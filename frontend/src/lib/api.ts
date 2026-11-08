@@ -222,6 +222,52 @@ export const authApi = {
     }),
 };
 
+// ---------- Question files (upload a bank → build a test) ----------
+export type QuestionFile = {
+  id: string;
+  filename: string;
+  source_type: string;
+  size_bytes: number;
+  total_rows: number;
+  imported_count: number;
+  duplicate_count: number;
+  error_count: number;
+  subjects: string[];
+  chapters: string[];
+  chapter_count: number;
+  question_count: number;
+  status: string;
+  created_at: string | null;
+};
+
+export type QuestionFileSample = {
+  id: number;
+  question_text: string;
+  options: { key: string; text: string }[];
+  correct_answer: string | number | string[];
+  chapter?: string | null;
+};
+
+export const questionFilesApi = {
+  list: () => api.get<{ items: QuestionFile[]; total: number }>("/question-files"),
+  get: (id: string) =>
+    api.get<{ item: QuestionFile; samples: QuestionFileSample[] }>(`/question-files/${id}`),
+  upload: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post<{ message: string; item: QuestionFile; skipped_rows?: number }>(
+      "/question-files",
+      form,
+    );
+  },
+  buildExam: (id: string, payload: Record<string, unknown>) =>
+    api.post<{ message: string; added: number; exam: Exam; created: boolean }>(
+      `/question-files/${id}/exam`,
+      payload,
+    ),
+  remove: (id: string) => api.delete<{ deleted: boolean }>(`/question-files/${id}`),
+};
+
 // ---------- Images (covers, product photos, avatars) ----------
 export type UploadedImage = {
   id: string;
