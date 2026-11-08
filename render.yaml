@@ -1,0 +1,96 @@
+# Render blueprint — one API + one static site, both on the free plan.
+#
+# Connect this repo in Render → "New → Blueprint" and it creates:
+#   cronyzo-api  : Flask (gunicorn, wsgi:app)  → https://cronyzo-api.onrender.com
+#   cronyzo-web  : Vite build served as static files → your domain
+#
+# Secret env vars are marked `sync: false`, so Render asks you to paste them
+# once instead of them living in git. Nothing here needs editing after the
+# first deploy except cronyzo-web's VITE_API_URL if you rename the API.
+
+services:
+  - type: web
+    name: cronyzo-api
+    runtime: python
+    plan: free
+    region: singapore
+    rootDir: backend
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: gunicorn -b 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 wsgi:app
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.13.4"
+      - key: FLASK_ENV
+        value: production
+      # ── required ────────────────────────────────────────────────
+      - key: DATABASE_URL            # Neon pooled connection string
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: PUBLIC_SITE_URL         # https://your-domain.com
+        sync: false
+      # ── Google / Firebase sign-in ───────────────────────────────
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: VITE_FIREBASE_API_KEY
+        sync: false
+      # ── Telegram (two bots) ─────────────────────────────────────
+      - key: TELEGRAM_BOT_TOKEN      # @asoom7691_bot  (students / support)
+        sync: false
+      - key: TELEGRAM_SHOP_BOT_TOKEN # @Cronyzo_bot    (shopping)
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      # ── Media ───────────────────────────────────────────────────
+      - key: CLOUDINARY_URL
+        sync: false
+      # ── Payments (leave empty to stay in demo mode) ─────────────
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: PAYMENTS_MODE
+        value: auto
+
+  - type: web
+    name: cronyzo-web
+    runtime: static
+    plan: free
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    autoDeploy: true
+    envVars:
+      - key: VITE_API_URL
+        value: https://cronyzo-api.onrender.com/api
+      - key: VITE_FIREBASE_API_KEY
+        sync: false
+      - key: VITE_FIREBASE_AUTH_DOMAIN
+        sync: false
+      - key: VITE_FIREBASE_PROJECT_ID
+        sync: false
+      - key: VITE_FIREBASE_STORAGE_BUCKET
+        sync: false
+      - key: VITE_FIREBASE_SENDER_ID
+        sync: false
+      - key: VITE_FIREBASE_APP_ID
+        sync: false
+    routes:
+      # Single-page app: every unknown path is handed to the router.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
