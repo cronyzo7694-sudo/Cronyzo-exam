@@ -14,6 +14,7 @@ Stable endpoints under ``/api/books``::
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, Final, Optional
 
 from flask import Blueprint, jsonify, request
@@ -78,6 +79,46 @@ def _clean(value: Any, limit: int) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # Public catalog
 # ---------------------------------------------------------------------------
+# ── External book files (link-based listings) ───────────────────────────────
+# Not everybody wants to upload a 40 MB PDF: many sellers already keep the file
+# on Google Drive, Dropbox or their own site. A listing may therefore point at
+# an external URL, and the download endpoint hands that URL to the buyer after
+# the same purchase check. Only http(s) is accepted — never `javascript:` or a
+# `data:` blob, which is how a "link" turns into an XSS hole.
+_ALLOWED_FILE_SCHEMES: Final = ("http://", "https://")
+
+_DRIVE_FILE_ID = re.compile(
+    r"drive\.google\.com/(?:file/d/|open\?id=|uc\?(?:export=\w+&)?id=)([A-Za-z0-9_-]{10,})",
+    re.IGNORECASE,
+)
+_DROPBOX_SHARE = re.compile(r"www\.dropbox\.com/", re.IGNORECASE)
+
+
+def _normalise_file_url(value: Any, limit: int = _MAX_URL) -> Optional[str]:
+    """Turn any *shared* file link into something that actually downloads.
+
+    Google Drive's `/file/d/<id>/view?usp=sharing` opens a web page, not a file,
+    so it is rewritten to the `uc?export=download` endpoint. Dropbox's `?dl=0`
+    becomes `?raw=1`. Everything else is passed through untouched.
+    """
+    url = _clean(value, limit)
+    if not url:
+        return None
+    if not url.lower().startswith(_ALLOWED_FILE_SCHEMES):
+        return None
+
+    drive = _DRIVE_FILE_ID.search(url)
+    if drive:
+        return f"https://drive.google.com/uc?export=download&id={drive.group(1)}"
+
+    if _DROPBOX_SHARE.search(url):
+        if "dl=0" in url:
+            return url.replace("dl=0", "raw=1")
+        if "dl=1" in url and "raw=1" not in url:
+            return url.replace("dl=1", "raw=1")
+    return url
+
+
 @books_bp.get("")
 def list_books():
     """Public book catalog — no auth required."""
@@ -249,6 +290,12 @@ def create_book():
         # No upload yet — deterministic placeholder so the card is never blank.
         cover_url = cover_artwork(title, seed=book_slug, glyph="book")
 
+    # ── Optional external file (Google Drive / Dropbox / any https URL) ──
+    file_url = _normalise_file_url(data.get("file_url") or data.get("pdf_url"))
+    preview_url = _normalise_file_url(
+        data.get("preview_url") or data.get("preview_pdf_url")
+    )
+
     book = Book(
         seller_id=user.id,
         title=title,
@@ -268,6 +315,12 @@ def create_book():
         format=fmt,
         stock=max(0, _safe_int(data.get("stock"), 0)),
         status="published",
+        pdf_url=file_url,
+        pdf_name=_clean(data.get("file_name"), 255)
+        or (f"{book_slug}.pdf" if file_url else None),
+        preview_pdf_url=preview_url,
+        is_free_download=bool(data.get("is_free_download")),
+        preview_pages=max(0, _safe_int(data.get("preview_pages"), 0)),
     )
     db.session.add(book)
     try:
@@ -445,9 +498,17 @@ def upload_book_pdf(book_id: int):
         book.pdf_name = info["file_name"]
         book.pdf_size_bytes = int(info["size_bytes"])
     else:
-        url = _clean(body.get("pdf_url"), _MAX_URL)
+        url = _normalise_file_url(body.get("pdf_url") or body.get("file_url"))
         if not url:
-            return jsonify({"error": "Upload a PDF file or supply pdf_url"}), 400
+            return (
+                jsonify(
+                    {
+                        "error": "Upload a PDF file or supply a valid https file link",
+                        "code": "invalid_file_url",
+                    }
+                ),
+                400,
+            )
         book.pdf_url = url
         book.pdf_name = _clean(body.get("pdf_name"), 255) or "book.pdf"
 

@@ -470,9 +470,14 @@ function CreateBookPageInner() {
     description: "",
     highlights: "",
     // Digital edition — Cronyzo publications are PDF-first by design, so this
-    // is on from the start and the PDF is mandatory (see handleSubmit).
+    // is on from the start and the file is mandatory (see handleSubmit).
     is_digital: true,
     is_free_download: false,
+    // "link" = the file already lives somewhere else (Google Drive, Dropbox,
+    // the seller's own site) and we only store the URL. "upload" = we host it.
+    file_mode: "link" as "link" | "upload",
+    file_url: "",
+    preview_url: "",
   });
 
   const pdfRef = useRef<HTMLInputElement | null>(null);
@@ -498,10 +503,20 @@ function CreateBookPageInner() {
         cover_url: form.cover_url,
         description: form.description,
         highlights: form.highlights,
+        // Link-based listing: the API normalises Drive/Dropbox share links
+        // and applies the same purchase check before handing the URL out.
+        file_url: form.is_digital && form.file_mode === "link" ? form.file_url.trim() : "",
+        preview_url:
+          form.is_digital && form.file_mode === "link" ? form.preview_url.trim() : "",
+        is_free_download: form.is_free_download,
       }),
     onSuccess: async (res) => {
       // The PDFs are attached in a second step: the listing must exist first so
       // the upload is scoped to its own book id (and its own ownership check).
+      if (form.file_mode === "link") {
+        navigate({ to: "/books/$slug", params: { slug: res.item.slug } });
+        return;
+      }
       try {
         const bookId = res.item.id;
         const pdf = pdfRef.current?.files?.[0];
@@ -535,7 +550,21 @@ function CreateBookPageInner() {
   const handleSubmit = (e: { preventDefault: () => void }) => {
     e.preventDefault();
     setUploadError(null);
-    if (form.is_digital && !pdfRef.current?.files?.[0]) {
+    if (form.is_digital && form.file_mode === "link") {
+      const link = form.file_url.trim();
+      if (!/^https?:\/\//i.test(link)) {
+        setUploadError(
+          "Paste the book's file link (it must start with https://) — Google Drive, " +
+            "Dropbox or any direct PDF link. Or switch to “Upload a PDF”.",
+        );
+        return;
+      }
+      if (form.preview_url.trim() && !/^https?:\/\//i.test(form.preview_url.trim())) {
+        setUploadError("The free-sample link must start with https://");
+        return;
+      }
+    }
+    if (form.is_digital && form.file_mode === "upload" && !pdfRef.current?.files?.[0]) {
       setUploadError(
         "Publishing is PDF-only — attach the book PDF before listing it. " +
           "Untick “Sell this as a PDF e-book” only for a physical title.",
@@ -666,13 +695,22 @@ function CreateBookPageInner() {
               className={inputCls}
             />
           </Field>
-          <Field label="Cover URL">
-            <input
-              value={form.cover_url}
-              onChange={(e) => setForm({ ...form, cover_url: e.target.value })}
-              placeholder="https://res.cloudinary.com/…/cover.jpg"
-              className={inputCls}
-            />
+          <Field label="Cover image URL" hint="Paste any image link — Drive, Cloudinary, Imgur.">
+            <div className="flex items-center gap-2">
+              <input
+                value={form.cover_url}
+                onChange={(e) => setForm({ ...form, cover_url: e.target.value })}
+                placeholder="https://res.cloudinary.com/…/cover.jpg"
+                className={inputCls}
+              />
+              {/^https?:\/\//i.test(form.cover_url) && (
+                <img
+                  src={form.cover_url}
+                  alt=""
+                  className="h-10 w-8 shrink-0 rounded border object-cover"
+                />
+              )}
+            </div>
           </Field>
         </div>
 
@@ -724,7 +762,75 @@ function CreateBookPageInner() {
           </label>
 
           {form.is_digital && (
-            <div className="mt-3 space-y-2.5 border-t pt-3">
+            <div className="mt-3 space-y-3 border-t pt-3">
+              {/* Where does the file live? Most sellers already have it in
+                  Drive — forcing a 40 MB upload would only empty their patience. */}
+              <div className="flex rounded-xl border bg-card p-1">
+                {([
+                  ["link", "Paste a link", "Google Drive / Dropbox / your site"],
+                  ["upload", "Upload a PDF", "Cronyzo hosts the file"],
+                ] as const).map(([key, title, hint]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setForm({ ...form, file_mode: key })}
+                    className={cn(
+                      "flex-1 rounded-lg px-3 py-2 text-left transition-colors",
+                      form.file_mode === key
+                        ? "bg-primary text-white shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <span className="block text-[12.5px] font-bold">{title}</span>
+                    <span
+                      className={cn(
+                        "block text-[10.5px]",
+                        form.file_mode === key ? "text-white/80" : "text-muted-foreground",
+                      )}
+                    >
+                      {hint}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              {form.file_mode === "link" ? (
+                <div className="space-y-2.5">
+                  <div>
+                    <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                      Book file link *
+                    </p>
+                    <input
+                      value={form.file_url}
+                      onChange={(e) => setForm({ ...form, file_url: e.target.value })}
+                      placeholder="https://drive.google.com/file/d/…/view?usp=sharing"
+                      className={inputCls}
+                    />
+                    <p className="mt-1 text-[10.5px] text-muted-foreground">
+                      Google Drive: right-click the PDF → <b>Share → Anyone with the
+                      link</b>. Then paste the link here — we convert it to a direct
+                      download automatically. Buyers only receive it after payment
+                      (or instantly, if you tick “Free to download”).
+                    </p>
+                  </div>
+                  <div>
+                    <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                      Free sample link (optional)
+                    </p>
+                    <input
+                      value={form.preview_url}
+                      onChange={(e) => setForm({ ...form, preview_url: e.target.value })}
+                      placeholder="https://drive.google.com/file/d/…/view?usp=sharing"
+                      className={inputCls}
+                    />
+                  </div>
+                  <p className="rounded-lg bg-muted/50 px-2.5 py-1.5 text-[10.5px] text-muted-foreground">
+                    Nothing is uploaded — your database stays light and the file
+                    stays in your own Drive.
+                  </p>
+                </div>
+              ) : (
+                <>
               <div>
                 <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                   Full book PDF
@@ -752,6 +858,8 @@ function CreateBookPageInner() {
                   best-converting thing on a book page.
                 </p>
               </div>
+                </>
+              )}
 
               <label className="flex items-center gap-2 text-[12px] font-semibold">
                 <input
