@@ -13,7 +13,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/frontend"
 
 echo "▸ building frontend…"
-npm run build
+# Same-origin build: this copy is served BY the API host, so relative /api is
+# both faster (no CORS preflight) and immune to the other host being asleep.
+VITE_API_URL=/api npm run build
 
 echo "▸ copying dist → backend/static_site"
 rm -rf "$ROOT/backend/static_site"
