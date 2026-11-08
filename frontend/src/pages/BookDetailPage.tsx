@@ -22,6 +22,8 @@ import {
   Truck,
 } from "lucide-react";
 import { booksApi } from "@/lib/commerce";
+import { reviewsApi } from "@/lib/api";
+import { ReviewCard, ReviewForm, ReviewSummaryBar } from "@/components/reviews/Reviews";
 import { Button } from "@/components/ui/button";
 import { Price, Rating } from "@/components/commerce/Primitives";
 import { BookCard } from "@/components/commerce/Cards";
@@ -49,6 +51,13 @@ export function BookDetailPage() {
    */
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfNote, setPdfNote] = useState<string | null>(null);
+
+  /** Real reviews — the only thing that moves the stars on this page. */
+  const reviewsQuery = useQuery({
+    queryKey: ["book-reviews", book?.id],
+    queryFn: () => reviewsApi.book(book!.id),
+    enabled: Boolean(book?.id),
+  });
 
   const openDownload = async () => {
     if (!book) return;
@@ -491,6 +500,46 @@ export function BookDetailPage() {
             </div>
           </aside>
         </div>
+
+        {/* Ratings & reviews — live, from real accounts */}
+        <section className="mt-14" id="reviews">
+          <h2 className="text-xl font-bold text-foreground">Ratings &amp; reviews</h2>
+          <p className="mt-1 text-[12.5px] text-muted-foreground">
+            Written by people who signed in — one review per person, editable any time.
+          </p>
+
+          <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_380px]">
+            <div className="space-y-4">
+              {reviewsQuery.data?.summary ? (
+                <ReviewSummaryBar summary={reviewsQuery.data.summary} />
+              ) : null}
+
+              {reviewsQuery.isLoading ? (
+                <div className="h-28 animate-pulse rounded-2xl border bg-card" />
+              ) : (reviewsQuery.data?.items?.length ?? 0) === 0 ? (
+                <div className="rounded-2xl border border-dashed bg-muted/20 p-6 text-center">
+                  <p className="text-[13px] font-bold">No reviews for this book yet</p>
+                  <p className="mx-auto mt-1 max-w-sm text-[12px] text-muted-foreground">
+                    Bought or read it? Your rating is what the next buyer looks at first.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {reviewsQuery.data!.items.map((review) => (
+                    <ReviewCard key={review.id} review={review} compact />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <ReviewForm
+                target={{ type: "book", id: book.id }}
+                onSaved={() => void reviewsQuery.refetch()}
+              />
+            </div>
+          </div>
+        </section>
 
         {/* Related */}
         {related && related.items.length > 1 && (

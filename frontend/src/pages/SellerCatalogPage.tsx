@@ -10,12 +10,14 @@ import {
   ExternalLink,
   GraduationCap,
   Package,
+  Pencil,
   Plus,
   Trash2,
 } from "lucide-react";
 import { useState } from "react";
 import { booksApi, coursesApi, shopApi } from "@/lib/commerce";
 import { EmptyState, Price, Rating } from "@/components/commerce/Primitives";
+import { EditListingDialog } from "@/components/seller/EditListingDialog";
 import { Button } from "@/components/ui/button";
 
 type Kind = "courses" | "books" | "products";
@@ -85,6 +87,7 @@ export function SellerCatalogPage({ kind }: { kind: Kind }) {
 
   /** Two-step delete — an accidental click must never drop a live listing. */
   const [confirmId, setConfirmId] = useState<number | null>(null);
+  const [editing, setEditing] = useState<{ id: number; slug: string } | null>(null);
 
   const askDelete = (id: number) => {
     if (confirmId === id) {
@@ -100,6 +103,7 @@ export function SellerCatalogPage({ kind }: { kind: Kind }) {
     kind === "courses"
       ? (courses?.items ?? []).map((c) => ({
           id: c.id,
+          slug: c.slug,
           title: c.title,
           subtitle: c.subtitle ?? c.category,
           image: c.thumbnail_url,
@@ -114,6 +118,7 @@ export function SellerCatalogPage({ kind }: { kind: Kind }) {
       : kind === "books"
         ? (books?.items ?? []).map((b) => ({
             id: b.id,
+            slug: b.slug,
             title: b.title,
             subtitle: b.author ?? b.category,
             image: b.cover_url,
@@ -127,6 +132,7 @@ export function SellerCatalogPage({ kind }: { kind: Kind }) {
           }))
         : (products?.items ?? []).map((p) => ({
             id: p.id,
+            slug: p.slug,
             title: p.title,
             subtitle: p.brand ?? p.category_name ?? "",
             image: p.image_url,
@@ -265,6 +271,18 @@ export function SellerCatalogPage({ kind }: { kind: Kind }) {
                     <ExternalLink className="h-4 w-4" />
                   </Link>
                 </Button>
+                {kind !== "courses" && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    title="Edit listing"
+                    aria-label={`Edit ${row.title}`}
+                    onClick={() => setEditing({ id: row.id, slug: row.slug })}
+                    className="text-muted-foreground hover:text-primary"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                )}
                 {kind === "products" && (
                   <Button
                     variant="ghost"
@@ -295,6 +313,15 @@ export function SellerCatalogPage({ kind }: { kind: Kind }) {
             </div>
           ))}
         </div>
+      )}
+
+      {editing && (
+        <EditListingDialog
+          kind={kind === "books" ? "books" : "products"}
+          id={editing.id}
+          slug={editing.slug}
+          onClose={() => setEditing(null)}
+        />
       )}
     </div>
   );

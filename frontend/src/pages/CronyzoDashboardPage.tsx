@@ -36,6 +36,7 @@ import {
   Store,
   TrendingUp,
   UserRound,
+  Zap,
 } from "lucide-react";
 import { learningApi, ordersApi, type Enrollment, type Order } from "@/lib/commerce";
 import { siteApi } from "@/lib/api";
@@ -122,6 +123,39 @@ export function CronyzoDashboardPage() {
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 py-8 sm:px-6 lg:px-8">
+      {/* ══ Test-first CTA ═════════════════════════════════════════════════
+          Most people come here to sit a test, so the fastest path to one sits
+          above everything else — on the phone it is the first thing under the
+          greeting. */}
+      <section className="mb-4 overflow-hidden rounded-2xl border border-primary/25 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent p-4 sm:p-5">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+            <ClipboardList className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[14px] font-extrabold leading-tight">Test dena shuru karo</p>
+            <p className="mt-0.5 text-[12px] leading-snug text-muted-foreground">
+              Live mock tests, full-length papers aur aapke attempts — ek tap me.
+            </p>
+          </div>
+          <div className="flex w-full gap-2 sm:w-auto">
+            <Link
+              to="/exams"
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-[13px] font-bold text-primary-foreground shadow-sm transition hover:brightness-110 sm:flex-none"
+            >
+              <Zap className="h-4 w-4" />
+              Take a test
+            </Link>
+            <Link
+              to="/attempts"
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border bg-card px-4 py-2.5 text-[13px] font-bold transition hover:bg-muted sm:flex-none"
+            >
+              My attempts
+            </Link>
+          </div>
+        </div>
+      </section>
+
       {/* ══ Welcome ══════════════════════════════════════════════════════ */}
       <section className="overflow-hidden rounded-3xl border bg-gradient-to-br from-indigo-50 via-violet-50 to-white p-6 dark:from-indigo-950/40 dark:via-violet-950/20 dark:to-background sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-6">

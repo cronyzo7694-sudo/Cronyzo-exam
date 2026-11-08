@@ -170,6 +170,7 @@ def _register_blueprints(app: Flask) -> None:
     from app.routes.uploads import images_bp, uploads_bp
     from app.routes.spa import spa_bp
     from app.routes.question_files import question_files_bp
+    from app.routes.reviews import reviews_bp
 
     # URL prefixes are part of the public API contract — do not change
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -215,6 +216,7 @@ def _register_blueprints(app: Flask) -> None:
     # The built web app, served from this host when a Cloudflare deploy is not
     # available. Registered last so it only claims URLs no API route matched.
     app.register_blueprint(question_files_bp, url_prefix="/api/question-files")
+    app.register_blueprint(reviews_bp, url_prefix="/api/reviews")
     app.register_blueprint(spa_bp)
 
     # --------------------------------------------

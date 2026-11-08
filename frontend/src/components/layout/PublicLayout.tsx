@@ -298,6 +298,9 @@ export function MobileBottomNav({
   // "You" is the account tab: identity, orders, password — not just a dashboard.
   const youTarget = user ? "/account" : "/login";
 
+  // `onSearch` still powers the header search sheet on phones.
+  void onSearch;
+
   const items: {
     key: string;
     label: string;
@@ -328,11 +331,13 @@ export function MobileBottomNav({
       active: isActive(pathname, "/shop") || isActive(pathname, "/stores"),
     },
     {
-      key: "search",
-      label: "Search",
-      icon: Search,
-      onClick: onSearch,
-      active: false,
+      // Main job of the site is sitting tests, so "Test" gets a thumb-reachable
+      // slot of its own. Search moved up into the header (magnifier button).
+      key: "test",
+      label: "Test",
+      icon: Zap,
+      onClick: () => navigate({ to: "/exams" }),
+      active: isActive(pathname, "/exams") || isActive(pathname, "/attempts"),
     },
     {
       key: "you",
@@ -674,6 +679,17 @@ export function SiteHeader() {
           </div>
 
           <div className="ml-auto flex items-center gap-2 lg:ml-0">
+            {/* Mobile search — the bottom bar now carries Test, so search
+                lives here as a one-tap magnifier. */}
+            <button
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border bg-card lg:hidden"
+              aria-label="Search"
+            >
+              <Search className="h-[18px] w-[18px]" />
+            </button>
+
             <CartPill />
 
             {signedIn ? (

@@ -6,7 +6,7 @@ import {
   ChevronLeft, ChevronRight, Search, Sun, Moon, Bell,
   BookOpen, Home, Sparkles, Trophy, Target, Zap,
   Bot, HelpCircle, FileText, Scale, ShieldCheck, Info, MessageSquare, MessageCircle,
-  ShoppingBag, ShoppingCart, Store, Package, FileJson,
+  ShoppingBag, ShoppingCart, Store, Package, FileJson, Star,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useMemo, createContext, useContext } from "react";
 import { useAuthStore } from "@/stores/authStore";
@@ -106,6 +106,7 @@ const navigation: NavGroup[] = [
       { to: "/admin/exams", label: "Exam Builder", icon: GraduationCap, adminOnly: true },
       { to: "/admin/import", label: "Import", icon: Upload, adminOnly: true, flag: "ENABLE_IMPORT" },
       { to: "/admin/question-files", label: "Question Files", icon: FileJson, adminOnly: true },
+      { to: "/admin/reviews", label: "Reviews", icon: Star, adminOnly: true },
       { to: "/admin/file-bank", label: "File Bank", icon: Layers, adminOnly: true, badge: "AI" },
       { to: "/admin/users", label: "Users", icon: Users, adminOnly: true, flag: "ENABLE_ADMIN_PANEL" },
       { to: "/admin/messages", label: "Messages", icon: MessageSquare, adminOnly: true },

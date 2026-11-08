@@ -40,6 +40,7 @@ from app.models.notification import (
 from app.models.knowledge import QuestionAppearance, KnowledgeIngestionJob
 from app.models.upload import StoredFile, UploadedImage
 from app.models.question_file import QuestionFile
+from app.models.review import Review
 from app.models.user_message import UserMessage
 
 # --- Cronyzo commerce domain (Learn / Read / Shop) ------------------------
@@ -128,6 +129,7 @@ __all__ = [
     "UploadedImage",
     "StoredFile",
     "QuestionFile",
+    "Review",
     # Site content
     "SiteSetting",
     "HeroSlide",

@@ -24,6 +24,7 @@ import { ChaptersPage } from "@/pages/admin/ChaptersPage";
 import { QuestionsPage } from "@/pages/admin/QuestionsPage";
 import { AdminExamsPage } from "@/pages/admin/AdminExamsPage";
 import { QuestionFilesPage } from "@/pages/admin/QuestionFilesPage";
+import { ReviewsModerationPage } from "@/pages/admin/ReviewsModerationPage";
 import { ImportPage } from "@/pages/admin/ImportPage";
 import { UsersPage } from "@/pages/admin/UsersPage";
 import { FileBankPage } from "@/pages/admin/FileBankPage";
@@ -472,6 +473,12 @@ const adminExamsRoute = createRoute({
   beforeLoad: () => requireAdmin(),
   component: AdminExamsPage,
 });
+const adminReviewsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/admin/reviews",
+  beforeLoad: () => requireAdmin(),
+  component: ReviewsModerationPage,
+});
 const adminQuestionFilesRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/admin/question-files",
@@ -648,6 +655,7 @@ const routeTree = rootRoute.addChildren([
     adminQuestionsRoute,
     adminExamsRoute,
     adminQuestionFilesRoute,
+    adminReviewsRoute,
     adminImportRoute,
     fileBankRoute,
     adminUsersRoute,

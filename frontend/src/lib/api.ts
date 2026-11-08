@@ -222,6 +222,60 @@ export const authApi = {
     }),
 };
 
+// ---------- Reviews (real people, moderated) ----------
+export type Review = {
+  id: number;
+  target_type: "book" | "site";
+  target_id: number | null;
+  rating: number;
+  title: string | null;
+  body: string | null;
+  is_verified: boolean;
+  is_hidden?: boolean;
+  book_title?: string | null;
+  user: {
+    id: number;
+    full_name: string;
+    avatar_url: string | null;
+    role?: string | null;
+    email?: string | null;
+  };
+  created_at: string | null;
+};
+
+export type ReviewSummary = {
+  average: number;
+  count: number;
+  buckets: Record<string, number>;
+};
+
+export const reviewsApi = {
+  /** Landing-page wall — database rows only, never seeded text. */
+  site: () =>
+    api.get<{ items: Review[]; total: number; average: number }>("/reviews/site?limit=9"),
+  writeSite: (payload: { rating: number; title?: string; body: string }) =>
+    api.post<{ message: string; item: Review }>("/reviews/site", payload),
+  book: (bookId: number) =>
+    api.get<{ items: Review[]; summary: ReviewSummary; total: number }>(`/reviews/book/${bookId}`),
+  writeBook: (bookId: number, payload: { rating: number; title?: string; body: string }) =>
+    api.post<{ message: string; item: Review; book?: { rating_avg: number; rating_count: number } }>(
+      `/reviews/book/${bookId}`,
+      payload,
+    ),
+  mine: (targetType: "book" | "site", targetId?: number) =>
+    api.get<{ items: Review[] }>(
+      `/reviews/mine?target_type=${targetType}${targetId ? `&target_id=${targetId}` : ""}`,
+    ),
+  /* admin */
+  adminList: (targetType?: "book" | "site") =>
+    api.get<{ items: Review[]; total: number; hidden: number }>(
+      `/reviews/admin${targetType ? `?target_type=${targetType}` : ""}`,
+    ),
+  adminSetHidden: (id: number, isHidden: boolean) =>
+    api.patch<{ message: string; item: Review }>(`/reviews/admin/${id}`, { is_hidden: isHidden }),
+  adminDelete: (id: number) => api.delete<{ deleted: boolean }>(`/reviews/admin/${id}`),
+};
+
 // ---------- Question files (upload a bank → build a test) ----------
 export type QuestionFile = {
   id: string;

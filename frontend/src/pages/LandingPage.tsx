@@ -37,12 +37,17 @@ import {
   Users,
   X,
   Zap,
+  MessageSquare,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { booksApi, coursesApi, shopApi, type Category } from "@/lib/commerce";
 import { BookCard, CourseCard, ProductCard } from "@/components/commerce/Cards";
 import { GridSkeleton, SectionHeading } from "@/components/commerce/Primitives";
+import { ReviewCard, ReviewForm } from "@/components/reviews/Reviews";
+import { StarRating } from "@/components/reviews/StarRating";
+import { reviewsApi } from "@/lib/api";
+import { useAuthStore } from "@/stores/authStore";
 import { useSite, useSetting } from "@/lib/site";
 import { GradientBackdrop } from "@/components/site/GradientBackdrop";
 import { HeroCarousel } from "@/components/site/HeroCarousel";
@@ -781,75 +786,105 @@ function SellCta() {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   Testimonials — auto-rotating
+   Reviews — real people, real words
+   ---------------------------------------------------------------
+   This section used to rotate hand-written quotes. Those are gone:
+   what shows here is exactly what signed-in people posted, and if
+   nobody has posted yet the section says so and invites the visitor
+   to be the first. Nothing here is invented.
    ═══════════════════════════════════════════════════════════ */
 
 function Testimonials() {
-  const { content } = useSite();
   const heading = useSetting<string>("testimonials.heading");
   const subheading = useSetting<string>("testimonials.subheading");
-  const quotes = content.testimonials || [];
-  const [index, setIndex] = useState(0);
+  const [writing, setWriting] = useState(false);
+  const { user } = useAuthStore();
 
-  useEffect(() => {
-    if (quotes.length <= 1) return;
-    const id = window.setInterval(() => {
-      setIndex((i) => (i + 1) % quotes.length);
-    }, 6000);
-    return () => window.clearInterval(id);
-  }, [quotes.length]);
+  const { data, isLoading } = useQuery({
+    queryKey: ["site-reviews"],
+    queryFn: () => reviewsApi.site(),
+    staleTime: 60_000,
+  });
 
-  if (quotes.length === 0) return null;
+  const items = data?.items ?? [];
+  const average = data?.average ?? 0;
+  const total = data?.total ?? 0;
 
   return (
-    <section className="border-t bg-muted/15">
+    <section id="reviews" className="border-t bg-muted/15">
       <div className="mx-auto max-w-[1400px] px-4 py-16 sm:px-6 lg:px-8">
-        <SectionHeading eyebrow="Real people" title={heading} description={subheading} />
-
-        <div className="mt-10 grid gap-5 md:grid-cols-3">
-          {quotes.slice(0, 3).map((q, i) => (
-            <figure
-              key={q.id}
-              className={cn(
-                "flex flex-col rounded-2xl border border-border/70 bg-card p-5 transition-all duration-500",
-                i === index % Math.min(quotes.length, 3)
-                  ? "shadow-lg shadow-indigo-500/10 ring-1 ring-primary/20"
-                  : "opacity-90",
-              )}
-            >
-              <div className="flex gap-0.5">
-                {Array.from({ length: 5 }).map((_, s) => (
-                  <Star key={s} className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                ))}
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <SectionHeading
+              eyebrow="Real people"
+              title={heading || "Loved by learners and sellers"}
+              description={
+                subheading ||
+                "Every rating and comment below was written by a signed-in member — no scripts, no stock quotes."
+              }
+            />
+            {total > 0 && (
+              <div className="mt-3 flex items-center gap-2">
+                <StarRating value={average} count={total} size="md" />
+                <span className="text-[12px] text-muted-foreground">
+                  average of {total} review{total === 1 ? "" : "s"}
+                </span>
               </div>
-              <blockquote className="mt-3 flex-1 text-[13.5px] leading-relaxed text-foreground/80">
-                “{q.quote}”
-              </blockquote>
-              <figcaption className="mt-5 flex items-center gap-3">
-                <span
-                  className={cn(
-                    "inline-flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-bold text-white",
-                    q.accent === "violet"
-                      ? "from-violet-500 to-fuchsia-500"
-                      : q.accent === "teal"
-                        ? "from-teal-500 to-cyan-500"
-                        : "from-indigo-500 to-violet-500",
-                  )}
-                >
-                  {q.initials}
-                </span>
-                <span>
-                  <span className="block text-[13px] font-bold text-foreground">
-                    {q.author_name}
-                  </span>
-                  <span className="block text-[11.5px] text-muted-foreground">
-                    {q.author_role}
-                  </span>
-                </span>
-              </figcaption>
-            </figure>
-          ))}
+            )}
+          </div>
+          <Button variant="outline" className="rounded-xl" onClick={() => setWriting((v) => !v)}>
+            <MessageSquare className="mr-2 h-4 w-4" />
+            {writing ? "Close" : user ? "Write a review" : "Sign in to review"}
+          </Button>
         </div>
+
+        {writing && (
+          <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_360px]">
+            <ReviewForm target={{ type: "site" }} onSaved={() => setWriting(false)} />
+            <div className="rounded-2xl border border-dashed bg-card/60 p-4 text-[12px] leading-relaxed text-muted-foreground">
+              <p className="font-bold text-foreground">How ratings work here</p>
+              <ul className="mt-2 list-disc space-y-1 pl-4">
+                <li>Only a signed-in account can rate — one review per person.</li>
+                <li>Book ratings on every listing are the average of the reviews, nothing else.</li>
+                <li>The operator can hide or delete abusive posts; your edit puts yours back.</li>
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {isLoading ? (
+          <div className="mt-8 grid gap-5 md:grid-cols-3">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-44 animate-pulse rounded-2xl border bg-card" />
+            ))}
+          </div>
+        ) : items.length === 0 ? (
+          <div className="mt-8 rounded-2xl border border-dashed bg-card p-8 text-center">
+            <p className="text-[14px] font-bold">No reviews yet — you can be the first</p>
+            <p className="mx-auto mt-1.5 max-w-md text-[12.5px] leading-relaxed text-muted-foreground">
+              Cronyzo does not publish invented testimonials. Buy a book, sit a mock test or sell
+              something, then tell everyone how it went — your words appear right here.
+            </p>
+            <Button
+              className="mt-4 rounded-xl"
+              onClick={() => {
+                if (!user) {
+                  window.location.href = "/login";
+                  return;
+                }
+                setWriting(true);
+              }}
+            >
+              Write the first review
+            </Button>
+          </div>
+        ) : (
+          <div className="mt-8 grid gap-5 md:grid-cols-3">
+            {items.slice(0, 6).map((review) => (
+              <ReviewCard key={review.id} review={review} />
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );
