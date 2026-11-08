@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   FileJson,
   Layers,
+  Loader2,
   Plus,
   Trash2,
   Upload,
@@ -71,6 +72,53 @@ export function QuestionFilesPage() {
       qc.invalidateQueries({ queryKey: ["exams"] });
     },
     onError: (err: any) => setBuildMsg({ ok: false, text: err?.message || "Could not build the test" }),
+  });
+
+  /* ── series builder: one file (or all files) → many tests ── */
+  const [series, setSeries] = useState({
+    per_test: "25",
+    duration_minutes: "21",
+    marks: "1",
+    negative_marks: "0.25",
+    tests_per_file: "",
+  });
+  const [seriesMsg, setSeriesMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const seriesPayload = () => ({
+    per_test: Number(series.per_test || 25),
+    duration_minutes: Number(series.duration_minutes || 21),
+    marks: Number(series.marks || 1),
+    negative_marks: Number(series.negative_marks || 0),
+    tests_per_file: Number(series.tests_per_file || 0),
+    status: "published",
+    exam_mode: "mock",
+    shuffle: true,
+  });
+
+  const seriesAll = useMutation({
+    mutationFn: () => questionFilesApi.buildSeries(seriesPayload()),
+    onSuccess: (res) => {
+      setSeriesMsg({
+        ok: true,
+        text: `${res.message} ${res.files
+          .filter((f) => f.created.length)
+          .map((f) => `${f.subject}: ${f.created.length}`)
+          .join(" · ")}`,
+      });
+      qc.invalidateQueries({ queryKey: ["exams"] });
+      qc.invalidateQueries({ queryKey: ["exams-for-file"] });
+    },
+    onError: (err: any) => setSeriesMsg({ ok: false, text: err?.message || "Series nahi ban payi" }),
+  });
+
+  const seriesOne = useMutation({
+    mutationFn: (fileId: string) => questionFilesApi.seriesFromFile(fileId, seriesPayload()),
+    onSuccess: (res) => {
+      setSeriesMsg({ ok: true, text: res.message });
+      qc.invalidateQueries({ queryKey: ["exams"] });
+      qc.invalidateQueries({ queryKey: ["exams-for-file"] });
+    },
+    onError: (err: any) => setSeriesMsg({ ok: false, text: err?.message || "Series nahi ban payi" }),
   });
 
   const remove = useMutation({
@@ -161,6 +209,67 @@ export function QuestionFilesPage() {
       </section>
 
       {/* ═══ Files ════════════════════════════════════════ */}
+      <section className="mb-5 rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/5 to-transparent p-4">
+        <div className="flex items-start gap-2">
+          <Layers className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <div className="min-w-0">
+            <p className="text-[13.5px] font-extrabold">Series banao — ek file se bahut se test</p>
+            <p className="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">
+              Har file ko chhote tests me tod dega: “English Test 1”, “English Test 2”, …
+              Numbering khud continue hoti hai, isliye dobara chalane par naye tests aage judte hain.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2.5 sm:grid-cols-5">
+          {[
+            { key: "per_test", label: "Qs per test" },
+            { key: "duration_minutes", label: "Minutes" },
+            { key: "marks", label: "Marks / Q" },
+            { key: "negative_marks", label: "Negative" },
+            { key: "tests_per_file", label: "Tests/file (0=all)" },
+          ].map((field) => (
+            <label key={field.key} className="block">
+              <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                {field.label}
+              </span>
+              <input
+                type="number"
+                step={field.key === "negative_marks" ? "0.05" : "1"}
+                min={0}
+                value={(series as any)[field.key]}
+                onChange={(e) => setSeries({ ...series, [field.key]: e.target.value })}
+                className="h-9 w-full rounded-xl border bg-card px-2.5 text-[12.5px] outline-none focus:border-primary/60"
+              />
+            </label>
+          ))}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <Button className="rounded-xl" disabled={seriesAll.isPending} onClick={() => seriesAll.mutate()}>
+            {seriesAll.isPending ? (
+              <>
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Bana rahe hain…
+              </>
+            ) : (
+              <>
+                <Layers className="mr-1.5 h-3.5 w-3.5" /> Saari files se series banao
+              </>
+            )}
+          </Button>
+          {seriesMsg && (
+            <span
+              className={cn(
+                "text-[11.5px] font-semibold",
+                seriesMsg.ok ? "text-emerald-600" : "text-destructive",
+              )}
+            >
+              {seriesMsg.text}
+            </span>
+          )}
+        </div>
+      </section>
+
       <section className="mb-5 rounded-2xl border bg-card">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <p className="text-[13px] font-bold">
@@ -222,6 +331,17 @@ export function QuestionFilesPage() {
                   >
                     <Plus className="mr-1.5 h-3.5 w-3.5" />
                     Make test
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="rounded-xl"
+                    disabled={seriesOne.isPending}
+                    title={`${Math.floor((file.question_count || 0) / Number(series.per_test || 25))} tests banenge`}
+                    onClick={() => seriesOne.mutate(file.id)}
+                  >
+                    <Layers className="mr-1.5 h-3.5 w-3.5" />
+                    Series
                   </Button>
                   <button
                     onClick={() => {

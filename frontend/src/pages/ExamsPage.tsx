@@ -1,158 +1,286 @@
+/**
+ * Mock tests — one card per TEST, exactly like the reference platform.
+ *
+ * Every card is a single test (25 Q · 21 min · 25 marks), grouped under a
+ * running "SERIES #N" badge. Nothing is grouped by subject here — subjects are
+ * only a filter chip, because a learner comes to sit *a test*, not to browse a
+ * syllabus. Attempts drive the card state:
+ *
+ *   never attempted → START TEST   ("Never attempted — fresh questions waiting")
+ *   half-done       → RESUME TEST  ("Half-done — resume anytime, timer picks up")
+ *   submitted       → VIEW RESULT  ("Completed — 18/25, 72%")
+ */
+
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
+import {
+  ArrowRight,
+  BookOpenCheck,
+  CheckCircle2,
+  Clock,
+  Loader2,
+  PlayCircle,
+  RotateCcw,
+  Search as SearchIcon,
+  Sigma,
+  Sparkles,
+  Trophy,
+  X,
+} from "lucide-react";
 import { examsApi, type Exam } from "@/lib/api";
-import { formatDuration } from "@/lib/utils";
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useExamPlayerStore } from "@/stores/examPlayerStore";
 import { Loader } from "@/components/Loader";
 import { useSlowFlag } from "@/lib/useSlowFlag";
-
-/* ══════════════════════════════════════════════════════════════
-   Constants
-   ══════════════════════════════════════════════════════════════ */
-
-const CATEGORIES = [
-  { key: "all", label: "All", color: "" },
-  { key: "ssc", label: "SSC", color: "#2563eb" },
-  { key: "banking", label: "Banking", color: "#059669" },
-  { key: "railway", label: "Railway", color: "#ea580c" },
-  { key: "upsc", label: "UPSC", color: "#7c3aed" },
-  { key: "teaching", label: "Teaching", color: "#0d9488" },
-  { key: "police", label: "Police", color: "#dc2626" },
-  { key: "defence", label: "Defence", color: "#4f46e5" },
-  { key: "state", label: "State Govt", color: "#b45309" },
-  { key: "engineering", label: "Engineering", color: "#475569" },
-  { key: "medical", label: "Medical", color: "#be123c" },
-  { key: "science", label: "Science", color: "#6d28d9" },
-  { key: "law", label: "Law", color: "#15803d" },
-  { key: "management", label: "Management", color: "#0891b2" },
-  { key: "agriculture", label: "Agriculture", color: "#65a30d" },
-  { key: "computer", label: "Computer & IT", color: "#334155" },
-  { key: "finance", label: "Finance & Insurance", color: "#a16207" },
-] as const;
-
-const SORTS = ["Newest", "Popular", "A-Z", "Updated"] as const;
-
-type SortKey = (typeof SORTS)[number];
+import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 12;
 
-/* ══════════════════════════════════════════════════════════════
-   Helpers
-   ══════════════════════════════════════════════════════════════ */
+type Filter = "all" | "new" | "progress" | "done";
 
-function detectCategory(title: string): string {
-  const t = title.toLowerCase();
-  // ----- Most specific / distinct categories first -----
-  // Medical
-  if (/(neet|aiims|inicet|nursing|norcet|paramedical)/.test(t)) return "medical";
-  // Science & Research
-  if (/(iat \(|nest|jest|iit jam|isro|drdo|barc|junior research|phd entrance)/.test(t)) return "science";
-  // Defence (before management so "AFCAT" isn't caught by "cat")
-  if (/\b(nda|cds|afcat|agniveer|army|navy|inet|mns|jag|rifleman)\b|air force|coast guard|navik|territorial|defence/.test(t)) return "defence";
-  // Management
-  if (/\b(cat|xat|cmat|mat|snap|nmat)\b|mba|management aptitude/.test(t)) return "management";
-  // Law / Judiciary
-  if (/(clat|ailet|slat|llb|judicial|civil judge|apo|legal|bar exam|aibe)/.test(t)) return "law";
-  // Agriculture
-  if (/(icar|agriculture|\bagri\b|crop)/.test(t)) return "agriculture";
-  // Computer & IT
-  if (/(nielit|ccc|computer operator|programmer|it officer|technical assistant)/.test(t)) return "computer";
-  // UPSC (before Engineering/Police so UPSC-prefixed stay in UPSC)
-  if (/^upsc/.test(t)) return "upsc";
-  // SSC (before state/police/railway so "SSC Stenographer"/"SSC GD Constable"/
-  // "SSC CPO"/"SSC JE" stay SSC)
-  if (t.includes("ssc")) return "ssc";
-  // State Govt / PSC / Patwari / Clerical / University (before Banking so
-  // "State Clerk"/"LDC"/"UDC" stay State)
-  if (/(mppsc|uppsc|bpsc|bihar|rpsc|rajasthan|mpsc|hpsc|haryana|patwari|state cet|state psc|state ssc|state clerk|ldc|udc|clerical|deo|stenographer|office|cuet|university entrance|common entrance|recruitment exams|departmental)/.test(t)) return "state";
-  // Teaching
-  if (/(ctet|tet|ugc net|csir net|\bset\b|jrf|b\.ed|d\.el\.ed|m\.ed|kvs|nvs|dsssb|teacher eligibility|eligibility test|teaching)/.test(t)) return "teaching";
-  // Banking — "clerk" only counts as banking when a bank name is present
-  if (/\b(ibps|sbi|rbi|nabard|sebi)\b|\blic\b|bank|po prelims|po mains|so /.test(t) || (/\bclerk\b/.test(t) && /\b(ibps|sbi|rbi|bank)\b/.test(t))) return "banking";
-  // Railway (before Engineering so "RRB Technician" stays Railway; word-boundary
-  // so "CRPF" is not caught by "rpf")
-  if (/(railway|rrb|ntpc|group d|alp|\brpf\b)/.test(t)) return "railway";
-  // Engineering (GATE, AE/JE, PSU, polytechnic, ITI)
-  if (/\bgate\b|engineering|ae\/je|psu|polytechnic|\biti\b|apprenticeship|trade test|technician/.test(t)) return "engineering";
-  // Police
-  if (/(police|constable|capf|crpf|bsf|cisf|itbp|ssb|assam rifles|cpo)/.test(t)) return "police";
-  // Insurance & Finance
-  if (/(niacl|nicl|uiic|lic assistant|irdai|sidbi|pfrda|insurance|finance)/.test(t)) return "finance";
-  // Default
-  return "ssc";
+const FILTERS: { key: Filter; label: string }[] = [
+  { key: "all", label: "All tests" },
+  { key: "new", label: "Not attempted" },
+  { key: "progress", label: "In progress" },
+  { key: "done", label: "Completed" },
+];
+
+function isLoadingAttempt(exam: Exam) {
+  return Boolean(exam.attempt?.in_progress);
 }
 
-function catColor(key: string): string {
-  return CATEGORIES.find((c) => c.key === key)?.color ?? "#6b7280";
+function isDone(exam: Exam) {
+  return Boolean(exam.attempt && !exam.attempt.in_progress);
 }
 
-function catEmoji(key: string): string {
-  const map: Record<string, string> = {
-    ssc: "🏛️", banking: "🏦", railway: "🚂", upsc: "🎓",
-    teaching: "📚", police: "🛡️", defence: "⚔️",
-  };
-  return map[key] ?? "📝";
+function isFresh(exam: Exam) {
+  return !exam.attempt;
 }
 
-function iconSvg(key: string) {
-  const dim = 28;
-  const base = 'fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"';
-  switch (key) {
-    case "ssc": return `<svg width="${dim}" height="${dim}" viewBox="0 0 24 24" ${base}><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>`;
-    case "banking": return `<svg width="${dim}" height="${dim}" viewBox="0 0 24 24" ${base}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>`;
-    case "railway": return `<svg width="${dim}" height="${dim}" viewBox="0 0 24 24" ${base}><rect x="4" y="6" width="16" height="12" rx="2"/><circle cx="8" cy="18" r="1.5"/><circle cx="16" cy="18" r="1.5"/></svg>`;
-    case "upsc": return `<svg width="${dim}" height="${dim}" viewBox="0 0 24 24" ${base}><path d="M12 3l3 7 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1z"/></svg>`;
-    case "teaching": return `<svg width="${dim}" height="${dim}" viewBox="0 0 24 24" ${base}><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>`;
-    case "police": return `<svg width="${dim}" height="${dim}" viewBox="0 0 24 24" ${base}><path d="M12 2l8 4v4c0 6-8 12-8 12S4 16 4 10V6l8-4z"/></svg>`;
-    case "defence": return `<svg width="${dim}" height="${dim}" viewBox="0 0 24 24" ${base}><path d="M12 2l8 4v4c0 6-8 12-8 12S4 16 4 10V6l8-4z"/></svg>`;
-    case "state": return `<svg width="${dim}" height="${dim}" viewBox="0 0 24 24" ${base}><path d="M4 21h16M6 21V8l6-4 6 4v13M9 10h2m2 0h2m-4 4h2m2 0h2"/></svg>`;
-    case "engineering": return `<svg width="${dim}" height="${dim}" viewBox="0 0 24 24" ${base}><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/></svg>`;
-    case "medical": return `<svg width="${dim}" height="${dim}" viewBox="0 0 24 24" ${base}><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 12h6m-3-3v6M8 8h8"/></svg>`;
-    case "science": return `<svg width="${dim}" height="${dim}" viewBox="0 0 24 24" ${base}><path d="M10 3v6L4 19a1 1 0 001 1h14a1 1 0 001-1L14 9V3M7 3h10"/></svg>`;
-    case "law": return `<svg width="${dim}" height="${dim}" viewBox="0 0 24 24" ${base}><path d="M12 3v18M5 6h14M5 6l-2 5a3 3 0 006 0L7 6M19 6l-2 5a3 3 0 006 0l-2-5M9 21h6"/></svg>`;
-    case "management": return `<svg width="${dim}" height="${dim}" viewBox="0 0 24 24" ${base}><path d="M3 21h18M5 21V8l7-4 7 4v13M9 11h2m2 0h2m-4 4h2m2 0h2"/></svg>`;
-    case "agriculture": return `<svg width="${dim}" height="${dim}" viewBox="0 0 24 24" ${base}><path d="M12 22c0-6-3-10-9-12 0 6 3 10 9 12zM12 22c0-6 3-10 9-12 0 6-3 10-9 12zM12 22V10"/></svg>`;
-    case "computer": return `<svg width="${dim}" height="${dim}" viewBox="0 0 24 24" ${base}><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>`;
-    case "finance": return `<svg width="${dim}" height="${dim}" viewBox="0 0 24 24" ${base}><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M3 11h18M8 7V5h8v2M7 15h2m4 0h2"/></svg>`;
-    default: return `<svg width="${dim}" height="${dim}" viewBox="0 0 24 24" ${base}><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 3"/></svg>`;
+/** "Half-done — 7 of 25 answered, timer picks up where you left." */
+function statusLine(exam: Exam) {
+  const attempt = exam.attempt;
+  if (!attempt) return "Never attempted — fresh questions waiting";
+  if (attempt.in_progress) {
+    const left = attempt.expires_at
+      ? Math.max(0, Math.round((new Date(attempt.expires_at).getTime() - Date.now()) / 60000))
+      : null;
+    return `Half-done — ${attempt.answered} of ${exam.total_questions} answered${
+      left !== null ? `, ${left} min left` : ""
+    }. Resume anytime.`;
   }
+  return `Completed — ${attempt.score} of ${attempt.max_score} marks (${Math.round(
+    attempt.percentage,
+  )}%). You can re-take it.`;
 }
 
-/* ══════════════════════════════════════════════════════════════
-   Loading Skeleton
-   ══════════════════════════════════════════════════════════════ */
+function ExamCard({
+  exam,
+  onStart,
+  starting,
+}: {
+  exam: Exam;
+  onStart: (exam: Exam) => void;
+  starting: number | null;
+}) {
+  const navigate = useNavigate();
+  const seriesNo = exam.series_no ?? null;
+  const subject = exam.subject || exam.title.replace(/\s*Test\s*\d+.*$/i, "").trim() || "Test";
+  const inProgress = isLoadingAttempt(exam);
+  const done = isDone(exam);
+  const fresh = isFresh(exam);
+  const isNew =
+    !exam.created_at ||
+    Date.now() - new Date(exam.created_at).getTime() < 7 * 24 * 3600 * 1000;
 
-function Skeleton() {
   return (
-    <div className="animate-in fade-in duration-300 space-y-6">
-      {/* Stats skeleton */}
-      <div className="flex flex-wrap gap-3">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="h-12 w-28 bg-muted rounded-xl animate-pulse" />
-        ))}
+    <article
+      className={cn(
+        "group relative flex h-full flex-col overflow-hidden rounded-2xl border bg-card p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg",
+        inProgress ? "border-amber-400/70" : done ? "border-emerald-500/40" : "hover:border-primary/40",
+      )}
+    >
+      {/* Top line: series badge + state */}
+      <div className="flex items-start justify-between gap-2">
+        <span className="inline-flex items-center gap-1 rounded-full bg-foreground px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-background">
+          {seriesNo ? `Series #${seriesNo}` : exam.exam_mode}
+        </span>
+        {inProgress ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+            In progress
+          </span>
+        ) : done ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+            Done
+          </span>
+        ) : isNew ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-700 dark:text-blue-400">
+            New
+          </span>
+        ) : null}
       </div>
-      {/* Search skeleton */}
-      <div className="h-11 bg-muted rounded-xl animate-pulse" />
-      {/* Chips skeleton */}
-      <div className="flex gap-2">
-        {[1, 2, 3, 4, 5, 6].map((i) => (
-          <div key={i} className="h-7 w-16 bg-muted rounded-full animate-pulse" />
-        ))}
+
+      {/* Title */}
+      <h3 className="mt-2.5 text-[15px] font-extrabold leading-snug tracking-tight">
+        {exam.title}
+      </h3>
+
+      {/* Subject chip with question count, like "English 25" */}
+      <div className="mt-1.5">
+        <span className="inline-flex items-center gap-1 rounded-md border bg-muted/40 px-1.5 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
+          {subject} {exam.total_questions}
+        </span>
       </div>
-      {/* Cards skeleton */}
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {[1, 2, 3, 4, 5, 6].map((i) => (
-          <div key={i} className="h-36 bg-muted rounded-2xl animate-pulse" />
-        ))}
+
+      {/* Facts row */}
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-medium text-muted-foreground">
+        <span className="inline-flex items-center gap-1">
+          <BookOpenCheck className="h-3 w-3" /> {exam.total_questions} Q
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <Clock className="h-3 w-3" /> {Math.round((exam.duration_seconds || 0) / 60)} min
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <Trophy className="h-3 w-3" /> {exam.total_marks} marks
+        </span>
+        <span className="inline-flex items-center gap-1 text-violet-600 dark:text-violet-400">
+          <Sigma className="h-3 w-3" /> Practice
+        </span>
       </div>
-    </div>
+
+      {/* Status line */}
+      <p
+        className={cn(
+          "mt-3 flex-1 text-[11.5px] leading-relaxed",
+          inProgress ? "font-semibold text-amber-700 dark:text-amber-400" : "text-muted-foreground",
+        )}
+      >
+        {statusLine(exam)}
+      </p>
+
+      {/* Action */}
+      <div className="mt-3 flex items-center gap-2 border-t pt-3">
+        {inProgress ? (
+          <button
+            onClick={() => onStart(exam)}
+            disabled={starting === exam.id}
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-amber-500 px-3 py-2 text-[12px] font-bold text-white transition hover:brightness-105 disabled:opacity-60"
+          >
+            {starting === exam.id ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <PlayCircle className="h-3.5 w-3.5" />
+            )}
+            Resume test
+          </button>
+        ) : done ? (
+          <>
+            <button
+              onClick={() =>
+                navigate({
+                  to: "/results/$attemptId",
+                  params: { attemptId: String(exam.attempt!.id) },
+                })
+              }
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-[12px] font-bold text-white transition hover:brightness-105"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" /> View result
+            </button>
+            <button
+              onClick={() => onStart(exam)}
+              disabled={starting === exam.id}
+              title="Re-take this test"
+              className="inline-flex items-center justify-center rounded-xl border px-2.5 py-2 text-muted-foreground transition hover:bg-muted disabled:opacity-60"
+            >
+              {starting === exam.id ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RotateCcw className="h-3.5 w-3.5" />
+              )}
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => onStart(exam)}
+            disabled={starting === exam.id}
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-[12px] font-bold text-primary-foreground transition hover:brightness-110 disabled:opacity-60"
+          >
+            {starting === exam.id ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5" />
+            )}
+            Start test
+          </button>
+        )}
+
+        <Link
+          to="/exams/$examId"
+          params={{ examId: String(exam.id) }}
+          className="inline-flex items-center gap-1 rounded-xl border px-2.5 py-2 text-[11.5px] font-semibold text-muted-foreground transition hover:bg-muted"
+        >
+          Info <ArrowRight className="h-3 w-3" />
+        </Link>
+      </div>
+    </article>
   );
 }
 
-/* ══════════════════════════════════════════════════════════════
-   Main Component
-   ══════════════════════════════════════════════════════════════ */
+function PageNumbers({
+  page,
+  pages,
+  onChange,
+}: {
+  page: number;
+  pages: number;
+  onChange: (page: number) => void;
+}) {
+  if (pages <= 1) return null;
+  const shown = new Set<number>([1, pages, page, page - 1, page + 1, page - 2, page + 2]);
+  const list = Array.from(shown)
+    .filter((n) => n >= 1 && n <= pages)
+    .sort((a, b) => a - b);
+
+  return (
+    <nav className="flex items-center justify-center gap-1" aria-label="Pagination">
+      <button
+        onClick={() => onChange(Math.max(1, page - 1))}
+        disabled={page === 1}
+        className="flex h-8 w-8 items-center justify-center rounded-lg border text-sm disabled:opacity-40"
+        aria-label="Previous page"
+      >
+        ‹
+      </button>
+      {list.map((n, index) => {
+        const gap = index > 0 && n - list[index - 1] > 1;
+        return (
+          <span key={n} className="flex items-center gap-1">
+            {gap && <span className="px-0.5 text-xs text-muted-foreground">…</span>}
+            <button
+              onClick={() => onChange(n)}
+              className={cn(
+                "h-8 min-w-8 rounded-lg px-2 text-[12px] font-bold transition",
+                n === page
+                  ? "bg-foreground text-background"
+                  : "border text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {n}
+            </button>
+          </span>
+        );
+      })}
+      <button
+        onClick={() => onChange(Math.min(pages, page + 1))}
+        disabled={page === pages}
+        className="flex h-8 w-8 items-center justify-center rounded-lg border text-sm disabled:opacity-40"
+        aria-label="Next page"
+      >
+        ›
+      </button>
+    </nav>
+  );
+}
 
 export function ExamsPage() {
   const navigate = useNavigate();
@@ -160,451 +288,249 @@ export function ExamsPage() {
   const reset = useExamPlayerStore((s) => s.reset);
 
   const [search, setSearch] = useState("");
-  const [activeCat, setActiveCat] = useState("all");
-  const [sort, setSort] = useState<SortKey>("Newest");
-  const [visible, setVisible] = useState(PAGE_SIZE);
+  const [subject, setSubject] = useState("all");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [page, setPage] = useState(1);
   const [starting, setStarting] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const searchRef = useRef<HTMLInputElement>(null);
-
-  /* ── Data ─────────────────────────────── */
   const { data, isLoading } = useQuery({
     queryKey: ["exams"],
     queryFn: () => examsApi.listAll("parent_id=null"),
+    refetchOnWindowFocus: true,
   });
   const slowLoad = useSlowFlag(isLoading, 3000);
 
-  const items: Exam[] = useMemo(() => (data || []), [data]);
+  const items = useMemo(() => data ?? [], [data]);
 
-  /* ── Stats ────────────────────────────── */
+  const subjects = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const exam of items) {
+      const name = exam.subject || "Other";
+      map.set(name, (map.get(name) || 0) + 1);
+    }
+    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
+  }, [items]);
+
+  // Only playable tests count — an exam with no questions is not a test yet,
+  // and showing it in the header would make the number disagree with the list.
   const stats = useMemo(() => {
-    const cats = new Set<string>();
-    items.forEach((e) => cats.add(detectCategory(e.title)));
+    const playable = items.filter((exam) => (exam.total_questions || 0) > 0);
     return {
-      total: items.length,
-      categories: cats.size,
-      published: items.filter((e) => e.status === "published").length,
+      total: playable.length,
+      inProgress: playable.filter(isLoadingAttempt).length,
+      done: playable.filter(isDone).length,
     };
   }, [items]);
 
-  /* ── Filtered & sorted ────────────────── */
   const processed = useMemo(() => {
-    let arr = [...items];
-
-    // Category filter
-    if (activeCat !== "all") {
-      arr = arr.filter((e) => detectCategory(e.title) === activeCat);
-    }
-
-    // Search
-    if (search.trim()) {
-      const q = search.toLowerCase();
+    let arr = items.filter((exam) => (exam.total_questions || 0) > 0);
+    if (subject !== "all") arr = arr.filter((e) => (e.subject || "Other") === subject);
+    if (filter === "new") arr = arr.filter(isFresh);
+    if (filter === "progress") arr = arr.filter(isLoadingAttempt);
+    if (filter === "done") arr = arr.filter(isDone);
+    const q = search.trim().toLowerCase();
+    if (q) {
       arr = arr.filter(
         (e) =>
           e.title.toLowerCase().includes(q) ||
-          (e.description || "").toLowerCase().includes(q)
+          (e.subject || "").toLowerCase().includes(q) ||
+          String(e.series_no ?? "").includes(q),
       );
     }
-
-    // Sort
-    switch (sort) {
-      case "A-Z":
-        arr.sort((a, b) => a.title.localeCompare(b.title));
-        break;
-      case "Popular":
-        arr.sort((a, b) => (b.total_questions || 0) - (a.total_questions || 0));
-        break;
-      case "Updated":
-        arr.sort(
-          (a, b) =>
-            new Date(b.created_at || 0).getTime() -
-            new Date(a.created_at || 0).getTime()
-        );
-        break;
-      default: // Newest
-        arr.sort(
-          (a, b) =>
-            new Date(b.created_at || 0).getTime() -
-            new Date(a.created_at || 0).getTime()
-        );
-    }
-
-    // Always push "coming soon" exams (no tests yet) to the end, keeping the
-    // chosen sort order within each group. Ready/clickable exams come first.
-    arr.sort((a, b) => {
-      const ca = (a as any).coming_soon ? 1 : 0;
-      const cb = (b as any).coming_soon ? 1 : 0;
-      return ca - cb;
+    return arr.sort((a, b) => {
+      const sa = a.series_no ?? Number.MAX_SAFE_INTEGER;
+      const sb = b.series_no ?? Number.MAX_SAFE_INTEGER;
+      if (sa !== sb) return sa - sb;
+      return a.title.localeCompare(b.title);
     });
+  }, [items, subject, filter, search]);
 
-    return arr;
-  }, [items, activeCat, search, sort]);
+  const pages = Math.max(1, Math.ceil(processed.length / PAGE_SIZE));
+  const safePage = Math.min(page, pages);
+  const shown = processed.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const from = processed.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+  const to = Math.min(safePage * PAGE_SIZE, processed.length);
 
-  const displayed = processed.slice(0, visible);
-  const hasMore = processed.length > visible;
+  const resetPaging = <T,>(setter: (v: T) => void) => (value: T) => {
+    setter(value);
+    setPage(1);
+  };
 
-  // Reset pagination on filter change
-  useEffect(() => { setVisible(PAGE_SIZE); }, [activeCat, search, sort]);
+  const startExam = async (exam: Exam) => {
+    setStarting(exam.id);
+    setError(null);
+    try {
+      reset();
+      const { attemptsApi } = await import("@/lib/api");
+      const payload = await attemptsApi.start(exam.id);
+      loadFromPayload(payload);
+      navigate({
+        to: "/play/$attemptId",
+        params: { attemptId: String(payload.attempt.id) },
+      });
+    } catch (err: any) {
+      setError(err?.message || "Test shuru nahi ho paya — dobara try karo.");
+    } finally {
+      setStarting(null);
+    }
+  };
 
-  /* ── Keyboard: Ctrl+K ─────────────────── */
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, []);
+  if (isLoading) {
+    return slowLoad ? (
+      <Loader
+        title="Loading tests"
+        messages={["Server jaga rahe hain…", "Tests la rahe hain…", "Bas thoda aur…"]}
+      />
+    ) : (
+      <div className="mx-auto max-w-5xl px-4 py-8">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-44 animate-pulse rounded-2xl border bg-card" />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
-  /* ── Start exam ───────────────────────── */
-  const startExam = useCallback(
-    async (examId: number, e: React.MouseEvent) => {
-      e.stopPropagation();
-      e.preventDefault();
-      setStarting(examId);
-      try {
-        reset();
-        const { attemptsApi } = await import("@/lib/api");
-        const payload = await attemptsApi.start(examId);
-        loadFromPayload(payload);
-        navigate({
-          to: "/play/$attemptId",
-          params: { attemptId: String(payload.attempt.id) },
-        });
-      } catch {
-        setStarting(null);
-      }
-    },
-    [navigate, loadFromPayload, reset]
-  );
-
-  /* ── Loading ──────────────────────────── */
-  if (isLoading) return slowLoad ? <Loader title="Loading exams" messages={["Server jaga rahe hain…", "Exams la rahe hain…", "Bas thoda aur…"]} /> : <Skeleton />;
-
-  /* ══════════════════════════════════════════════════════════ */
   return (
-    <div className="mx-auto max-w-5xl px-4 sm:px-6 py-8 space-y-6 animate-in fade-in duration-300">
-
-      {/* ── Header ─────────────────────────── */}
-      <header className="space-y-1">
-        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">
-          Exams
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Find your exam and start practising in seconds
-        </p>
+    <div className="mx-auto w-full max-w-5xl animate-in space-y-4 px-4 py-6 fade-in duration-300 sm:px-6 sm:py-8">
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-[22px] font-extrabold tracking-tight sm:text-3xl">Mock tests</h1>
+          <p className="mt-1 text-[12.5px] text-muted-foreground">
+            {stats.total} tests · {stats.inProgress} in progress · {stats.done} completed
+          </p>
+        </div>
+        {stats.inProgress > 0 && (
+          <button
+            onClick={() => resetPaging(setFilter)("progress")}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-amber-400/60 bg-amber-500/10 px-3 py-1.5 text-[12px] font-bold text-amber-700 dark:text-amber-400"
+          >
+            <PlayCircle className="h-3.5 w-3.5" /> Resume unfinished ({stats.inProgress})
+          </button>
+        )}
       </header>
 
-      {/* ── Stats row ──────────────────────── */}
-      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-        <StatPill label="Exams" value={stats.total} emoji="📚" />
-        <StatPill label="Categories" value={stats.categories} emoji="📂" />
-        <StatPill label="Published" value={stats.published} emoji="✅" />
-        <StatPill label="Updated today" value="—" emoji="🔄" muted />
-      </div>
-
-      {/* ── Search (sticky) ────────────────── */}
-      <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 space-y-3">
+      {/* Search + filters */}
+      <div className="space-y-2.5">
         <div className="relative">
-          <svg
-            className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/50"
-            fill="none" stroke="currentColor" viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+          <SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/60" />
           <input
-            ref={searchRef}
-            type="text"
-            placeholder="Search exams, SSC, UPSC, Railway…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-xl border bg-muted/40 pl-10 pr-20 py-2.5 text-sm placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/10 focus:border-primary/30 transition-all"
+            onChange={(e) => resetPaging(setSearch)(e.target.value)}
+            placeholder="Search test or series number (e.g. 42)…"
+            className="h-10 w-full rounded-xl border bg-muted/40 pl-9 pr-9 text-[13px] outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/10"
           />
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-            {search && (
-              <button onClick={() => setSearch("")} className="text-muted-foreground hover:text-foreground">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            )}
-            <kbd className="hidden sm:inline-flex items-center rounded-md border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground tracking-wide">
-              ⌘K
-            </kbd>
-          </div>
+          {search && (
+            <button
+              onClick={() => resetPaging(setSearch)("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              aria-label="Clear search"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
-        {/* ── Category chips ──────────────── */}
-        <div className="flex items-center gap-2">
-          <div className="flex gap-1.5 overflow-x-auto scrollbar-none flex-1">
-            {CATEGORIES.map((c) => (
-              <button
-                key={c.key}
-                onClick={() => setActiveCat(c.key)}
-                className={`shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-all duration-150 ${
-                  activeCat === c.key
-                    ? "bg-foreground text-background"
-                    : "border text-muted-foreground hover:text-foreground hover:border-primary/30"
-                }`}
-              >
-                {c.key !== "all" && (
-                  <span
-                    className="w-2 h-2 rounded-full"
-                    style={{ backgroundColor: c.color }}
-                  />
-                )}
-                {c.label}
-              </button>
-            ))}
-          </div>
-
-          {/* ── Sort ───────────────────────── */}
-          <div className="relative shrink-0">
-            <select
-              value={sort}
-              onChange={(e) => setSort(e.target.value as SortKey)}
-              className="appearance-none rounded-lg border bg-card pl-3 pr-7 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/10 cursor-pointer transition-colors"
+        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+          <button
+            onClick={() => resetPaging(setSubject)("all")}
+            className={cn(
+              "shrink-0 rounded-full px-3 py-1 text-[11.5px] font-semibold transition",
+              subject === "all"
+                ? "bg-foreground text-background"
+                : "border text-muted-foreground hover:border-primary/40",
+            )}
+          >
+            All subjects
+          </button>
+          {subjects.map(([name, count]) => (
+            <button
+              key={name}
+              onClick={() => resetPaging(setSubject)(name)}
+              className={cn(
+                "shrink-0 rounded-full px-3 py-1 text-[11.5px] font-semibold transition",
+                subject === name
+                  ? "bg-foreground text-background"
+                  : "border text-muted-foreground hover:border-primary/40",
+              )}
             >
-              {SORTS.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-            <svg className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
+              {name} <span className="opacity-60">{count}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+          {FILTERS.map((item) => (
+            <button
+              key={item.key}
+              onClick={() => resetPaging(setFilter)(item.key)}
+              className={cn(
+                "shrink-0 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition",
+                filter === item.key
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* ── Results count ──────────────────── */}
-      {search && (
-        <p className="text-xs text-muted-foreground -mt-2">
-          {processed.length} result{processed.length !== 1 ? "s" : ""} for "{search}"
+      {error && (
+        <p className="rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] font-semibold text-destructive">
+          {error}
         </p>
       )}
 
-      {/* ── Cards grid ─────────────────────── */}
-      {displayed.length === 0 ? (
-        /* Empty state */
-        <div className="text-center py-20 space-y-4">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-muted/50 flex items-center justify-center">
-            <svg className="w-7 h-7 text-muted-foreground/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-          </div>
-          <div>
-            <p className="text-sm font-medium text-foreground">No exams found</p>
-            <p className="text-xs text-muted-foreground mt-1">Try another search or category</p>
-          </div>
-          {search && (
-            <button onClick={() => setSearch("")} className="text-xs text-primary hover:underline">
-              Clear search
+      {/* Count line */}
+      <p className="text-[11.5px] font-medium text-muted-foreground">
+        Showing <span className="font-bold text-foreground">{from}–{to}</span> of{" "}
+        <span className="font-bold text-foreground">{processed.length}</span> tests
+      </p>
+
+      {/* Cards */}
+      {shown.length === 0 ? (
+        <div className="rounded-2xl border border-dashed bg-card px-5 py-14 text-center">
+          <p className="text-[14px] font-bold">No tests here yet</p>
+          <p className="mx-auto mt-1.5 max-w-sm text-[12.5px] leading-relaxed text-muted-foreground">
+            {filter === "progress"
+              ? "Koi adhoora test nahi hai — jo shuru kiya tha wo submit ho chuka hai."
+              : filter === "done"
+                ? "Abhi koi test complete nahi kiya — pehla test shuru karo."
+                : "Is filter par kuch nahi mila. Doosra subject ya filter try karo."}
+          </p>
+          {(search || subject !== "all" || filter !== "all") && (
+            <button
+              onClick={() => {
+                setSearch("");
+                setSubject("all");
+                setFilter("all");
+                setPage(1);
+              }}
+              className="mt-3 rounded-xl border px-3 py-1.5 text-[12px] font-semibold hover:bg-muted"
+            >
+              Reset filters
             </button>
           )}
         </div>
       ) : (
-        <>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {displayed.map((exam) => {
-              const cat = detectCategory(exam.title);
-              const color = catColor(cat);
-              const icon = iconSvg(cat);
-              const isStarting = starting === exam.id;
-              const createdAt = exam.created_at
-                ? new Date(exam.created_at)
-                : null;
-              const isNew =
-                createdAt &&
-                Date.now() - createdAt.getTime() < 7 * 24 * 3600 * 1000;
-
-              return (
-                (exam as any).coming_soon ? (
-                  /* COMING SOON — greyed, not clickable */
-                  <div
-                    key={exam.id}
-                    className="relative flex flex-col rounded-2xl border border-dashed bg-muted/30 p-4 opacity-90 select-none overflow-hidden"
-                    aria-disabled="true"
-                  >
-                    <div className="flex items-start gap-3">
-                      <div
-                        className="shrink-0 w-9 h-9 rounded-xl flex items-center justify-center grayscale opacity-60"
-                        style={{ backgroundColor: color + "18" }}
-                        dangerouslySetInnerHTML={{ __html: icon }}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <h3 className="text-sm font-semibold leading-snug truncate text-muted-foreground">
-                          {exam.title}
-                        </h3>
-                        <p className="text-[11px] text-muted-foreground/70 line-clamp-2 mt-0.5 leading-relaxed">
-                          {exam.description || "No description"}
-                        </p>
-                      </div>
-                    </div>
-                    {/* Big COMING SOON banner */}
-                    <div className="mt-5 mb-2 flex flex-col items-center justify-center py-4">
-                      <span className="text-lg sm:text-xl font-extrabold tracking-widest text-muted-foreground/70">
-                        COMING SOON
-                      </span>
-                      <span className="text-[11px] text-muted-foreground/60 mt-1">
-                        Tests jald hi add honge
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                <Link
-                  key={exam.id}
-                  to="/exams/$examId"
-                  params={{ examId: String(exam.id) }}
-                  className="group relative flex flex-col rounded-2xl border bg-card p-4 hover:border-primary/30 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-pointer"
-                >
-                  {/* Accent top line */}
-                  <div
-                    className="absolute top-0 left-4 right-4 h-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                    style={{ backgroundColor: color }}
-                  />
-
-                  {/* Header: icon + title */}
-                  <div className="flex items-start gap-3">
-                    <div
-                      className="shrink-0 w-9 h-9 rounded-xl flex items-center justify-center text-white"
-                      style={{ backgroundColor: color + "18" }}
-                      dangerouslySetInnerHTML={{ __html: icon }}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <h3 className="text-sm font-semibold leading-snug truncate">
-                        {exam.title}
-                      </h3>
-                      <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5 leading-relaxed">
-                        {exam.description || "No description"}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Stats row */}
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-3 text-[11px] text-muted-foreground/80">
-                    {exam.duration_seconds > 0 && (
-                      <span className="inline-flex items-center gap-1">
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        {formatDuration(exam.duration_seconds)}
-                      </span>
-                    )}
-                    <span>{exam.total_questions || 0} Q</span>
-                    <span>{exam.total_marks || 0} M</span>
-                    <span>{(exam.sections || []).length} sections</span>
-                  </div>
-
-                  {/* Footer: status badge + start button */}
-                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/50">
-                    <div className="flex items-center gap-2">
-                      <BadgeDot color={exam.status === "published" ? "#059669" : "#f59e0b"}>
-                        {exam.status}
-                      </BadgeDot>
-                      {isNew && (
-                        <span className="text-[10px] font-medium text-blue-500 bg-blue-50 dark:bg-blue-950/30 px-1.5 py-0.5 rounded-full">
-                          New
-                        </span>
-                      )}
-                    </div>
-                    <button
-                      onClick={(e) => startExam(exam.id, e)}
-                      disabled={isStarting}
-                      className="inline-flex items-center gap-1 rounded-lg bg-foreground px-3 py-1.5 text-[11px] font-semibold text-background opacity-0 group-hover:opacity-100 transition-all duration-200 hover:opacity-90 disabled:opacity-50"
-                    >
-                      {isStarting ? "Starting…" : "Start"}
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                      </svg>
-                    </button>
-                  </div>
-                </Link>
-                )
-              );
-            })}
-          </div>
-
-          {/* Show More */}
-          {hasMore && (
-            <div className="text-center pt-2">
-              <button
-                onClick={() => setVisible((p) => p + PAGE_SIZE)}
-                className="inline-flex items-center gap-1.5 rounded-xl border px-5 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
-              >
-                Show More
-                <span className="text-[10px] opacity-50">
-                  ({processed.length - displayed.length} remaining)
-                </span>
-              </button>
-            </div>
-          )}
-
-          {!hasMore && processed.length > PAGE_SIZE && (
-            <div className="text-center pt-2">
-              <button
-                onClick={() => setVisible(PAGE_SIZE)}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Show Less ↑
-              </button>
-            </div>
-          )}
-        </>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {shown.map((exam) => (
+            <ExamCard key={exam.id} exam={exam} onStart={startExam} starting={starting} />
+          ))}
+        </div>
       )}
-    </div>
-  );
-}
 
-/* ══════════════════════════════════════════════════════════════
-   Micro components
-   ══════════════════════════════════════════════════════════════ */
-
-function StatPill({
-  label,
-  value,
-  emoji,
-  muted,
-}: {
-  label: string;
-  value: number | string;
-  emoji: string;
-  muted?: boolean;
-}) {
-  return (
-    <div
-      className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${
-        muted
-          ? "border-dashed text-muted-foreground/50"
-          : "bg-card text-foreground"
-      }`}
-    >
-      <span className="text-sm">{emoji}</span>
-      <div className="flex items-baseline gap-1">
-        <span className={`font-semibold ${muted ? "" : ""}`}>{value}</span>
-        <span className="text-[10px] text-muted-foreground font-normal">
-          {label}
-        </span>
+      {/* Pagination */}
+      <div className="flex flex-col items-center gap-3 pt-2">
+        <PageNumbers page={safePage} pages={pages} onChange={setPage} />
+        <p className="text-[11px] text-muted-foreground">
+          Page {safePage} of {pages}
+        </p>
       </div>
     </div>
-  );
-}
-
-function BadgeDot({
-  color,
-  children,
-}: {
-  color: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground capitalize">
-      <span
-        className="w-1.5 h-1.5 rounded-full"
-        style={{ backgroundColor: color }}
-      />
-      {children}
-    </span>
   );
 }

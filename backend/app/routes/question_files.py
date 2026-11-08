@@ -644,6 +644,274 @@ def delete_question_file(file_id: str):
     return jsonify({"deleted": True, "id": file_id})
 
 
+# ══════════════════════════════════════════════════════════════════════════
+#  Series builder — one file in, MANY numbered tests out
+#  ---------------------------------------------------------------
+#  A single question bank is useless if the learner has to sit a 683-question
+#  paper. This turns a file into a run of small tests — "English Test 12",
+#  "English Test 13", … — each 25 questions / 21 minutes / 25 marks, with one
+#  global running number (the SERIES #N badge) so the wall of cards looks and
+#  behaves like the reference platform.
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def _subject_of(record: QuestionFile) -> str:
+    try:
+        subjects = json.loads(record.subjects_json or "[]")
+    except (TypeError, ValueError):
+        subjects = []
+    if isinstance(subjects, list):
+        for name in subjects:
+            if isinstance(name, str) and name.strip():
+                return name.strip()
+    stem = (record.filename or "test").rsplit(".", 1)[0]
+    for word in ("english", "mathematics", "maths", "physics", "chemistry", "biology", "raga", "reasoning", "gk"):
+        if word in stem.lower():
+            return word.capitalize() if word != "gk" else "GK"
+    return stem[:24].title() or "Test"
+
+
+def _next_series_no() -> int:
+    """Global running number for the SERIES #N badge."""
+    highest = 0
+    for exam in Exam.query.filter(Exam.rules_json.isnot(None)).all():
+        try:
+            rules = json.loads(exam.rules_json or "{}")
+        except (TypeError, ValueError):
+            continue
+        series = rules.get("series") if isinstance(rules, dict) else None
+        if not isinstance(series, dict):
+            continue
+        try:
+            highest = max(highest, int(series.get("no") or 0))
+        except (TypeError, ValueError):
+            continue
+    return highest + 1
+
+
+def _parse_series_options(data: Dict[str, Any]) -> Dict[str, Any]:
+    def _int(key, default, minimum=0, maximum=500):
+        try:
+            value = int(data.get(key) if data.get(key) is not None else default)
+        except (TypeError, ValueError):
+            value = default
+        return max(minimum, min(maximum, value))
+
+    per_test = _int("per_test", 25, 1, 200)
+    try:
+        marks = float(data.get("marks") if data.get("marks") is not None else per_test)
+    except (TypeError, ValueError):
+        marks = float(per_test)
+    try:
+        negative = float(data.get("negative_marks") if data.get("negative_marks") is not None else 0.25)
+    except (TypeError, ValueError):
+        negative = 0.25
+    return {
+        "per_test": per_test,
+        "tests_per_file": _int("tests_per_file", 0, 0, 500),  # 0 = as many as the pool allows
+        "duration_minutes": _int("duration_minutes", 21, 1, 300),
+        "marks": marks,
+        "negative_marks": negative,
+        "status": data.get("status") if data.get("status") in ("draft", "published") else "published",
+        "shuffle": bool(data.get("shuffle", True)),
+        "exam_mode": data.get("exam_mode") if data.get("exam_mode") in ("mock", "practice", "pyq", "sectional") else "mock",
+        "start_no": _int("start_no", 0, 0, 100000),
+    }
+
+
+def _build_series_for_file(record: QuestionFile, opts: Dict[str, Any], created_by: Optional[int], start_no: int) -> Dict[str, Any]:
+    """Slice one file's questions into tests. Returns a report dict."""
+    report = {"file": record.filename, "subject": _subject_of(record), "created": [], "skipped": None}
+
+    ids = record.question_ids
+    if not ids:
+        report["skipped"] = "no questions imported from this file"
+        return report
+
+    available = [q.id for q in Question.query.filter(Question.id.in_(ids)).all()]
+    if not available:
+        report["skipped"] = "the questions from this file were deleted"
+        return report
+
+    pool = list(available)
+    if opts["shuffle"]:
+        random.shuffle(pool)
+
+    per_test = opts["per_test"]
+    how_many = len(pool) // per_test
+    if opts["tests_per_file"]:
+        how_many = min(how_many, opts["tests_per_file"])
+    if how_many < 1:
+        report["skipped"] = f"needs at least {per_test} questions, file has {len(pool)}"
+        return report
+
+    subject = report["subject"]
+    no = start_no
+    for index in range(how_many):
+        chunk = pool[index * per_test : (index + 1) * per_test]
+        exam = Exam(
+            title=f"{subject} Test {no}"[:255],
+            description=f"Series test #{no} — {per_test} questions · {subject}",
+            exam_mode=opts["exam_mode"],
+            status=opts["status"],
+            duration_seconds=max(60, opts["duration_minutes"] * 60),
+            default_marks=opts["marks"],
+            default_negative_marks=opts["negative_marks"],
+            shuffle_questions=False,  # already shuffled when slicing
+            shuffle_options=True,
+            created_by=created_by,
+            total_questions=0,
+            total_marks=0.0,
+        )
+        # No DB migration needed: series metadata rides in rules_json.
+        exam.set_rules(
+            {
+                "series": {
+                    "no": no,
+                    "subject": subject,
+                    "file_id": record.id,
+                    "per_test": per_test,
+                    "duration_minutes": opts["duration_minutes"],
+                }
+            }
+        )
+        db.session.add(exam)
+        db.session.flush()
+
+        for order, qid in enumerate(chunk):
+            db.session.add(
+                ExamQuestion(
+                    exam_id=exam.id,
+                    question_id=qid,
+                    order_index=order,
+                    marks=opts["marks"],
+                    negative_marks=opts["negative_marks"],
+                )
+            )
+        _recount(exam)
+
+        report["created"].append(
+            {"exam_id": exam.id, "series_no": no, "title": exam.title, "questions": len(chunk)}
+        )
+        no += 1
+
+    return report
+
+
+@question_files_bp.post("/series")
+@roles_required("admin")
+def build_series():
+    """Turn one or more uploaded files into a numbered run of tests.
+
+    Body (all optional)::
+
+        {
+          "file_ids": ["abc", "def"],     // default: every imported file
+          "per_test": 25,
+          "tests_per_file": 0,            // 0 = as many full tests as the pool allows
+          "duration_minutes": 21,
+          "marks": 25,
+          "negative_marks": 0.25,
+          "status": "published",
+          "exam_mode": "mock",
+          "shuffle": true,
+          "start_no": 0                   // 0 = continue from the last series number
+        }
+
+    Response::
+
+        {"created": 112, "series": [...], "files": [{"file":..., "created":[...],
+          "skipped": null}], "next_no": 113}
+    """
+    data = request.get_json(silent=True) or {}
+    opts = _parse_series_options(data)
+
+    wanted_ids = data.get("file_ids") or []
+    if isinstance(wanted_ids, str):
+        wanted_ids = [wanted_ids]
+    if wanted_ids:
+        files = QuestionFile.query.filter(QuestionFile.id.in_([str(f) for f in wanted_ids])).all()
+    else:
+        files = QuestionFile.query.order_by(QuestionFile.created_at.asc()).all()
+
+    if not files:
+        return jsonify({"error": "no_files", "message": "Pehle question file upload karo."}), 400
+
+    try:
+        created_by = int((get_jwt() or {}).get("sub"))
+    except (TypeError, ValueError):
+        created_by = None
+
+    next_no = opts["start_no"] or _next_series_no()
+    reports: List[Dict[str, Any]] = []
+    made = 0
+    try:
+        for record in files:
+            report = _build_series_for_file(record, opts, created_by, next_no)
+            reports.append(report)
+            made += len(report["created"])
+            next_no += len(report["created"])
+        db.session.commit()
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+        logger.exception("series build failed")
+        return jsonify({"error": "could_not_build", "message": "Series banate waqt error aaya."}), 500
+
+    flat = [item for report in reports for item in report["created"]]
+    return (
+        jsonify(
+            {
+                "message": f"{made} tests ban gaye (ab next series number #{next_no}).",
+                "created": made,
+                "series": flat,
+                "files": reports,
+                "next_no": next_no,
+            }
+        ),
+        201,
+    )
+
+
+@question_files_bp.post("/<file_id>/series")
+@roles_required("admin")
+def build_series_from_file(file_id: str):
+    """Same as above, scoped to one file (the per-card button in the admin UI)."""
+    record = QuestionFile.query.get(file_id)
+    if record is None:
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json(silent=True) or {}
+    opts = _parse_series_options(data)
+    try:
+        created_by = int((get_jwt() or {}).get("sub"))
+    except (TypeError, ValueError):
+        created_by = None
+
+    next_no = opts["start_no"] or _next_series_no()
+    try:
+        report = _build_series_for_file(record, opts, created_by, next_no)
+        db.session.commit()
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+        logger.exception("series build failed file=%s", file_id)
+        return jsonify({"error": "could_not_build", "message": "Series banate waqt error aaya."}), 500
+
+    made = len(report["created"])
+    if made == 0:
+        return jsonify({"error": "nothing_to_build", "message": report["skipped"]}), 400
+    return (
+        jsonify(
+            {
+                "message": f"{made} tests ban gaye — {report['subject']} Test {next_no} se.",
+                "created": made,
+                "series": report["created"],
+                "files": [report],
+                "next_no": next_no + made,
+            }
+        ),
+        201,
+    )
+
+
 def _recount(exam: Exam) -> None:
     rows = ExamQuestion.query.filter_by(exam_id=exam.id).all()
     exam.total_questions = len(rows)

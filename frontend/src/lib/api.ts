@@ -319,6 +319,22 @@ export const questionFilesApi = {
       `/question-files/${id}/exam`,
       payload,
     ),
+  /** One file → MANY numbered tests ("English Test 12", "English Test 13", …). */
+  buildSeries: (payload: Record<string, unknown>) =>
+    api.post<{
+      message: string;
+      created: number;
+      series: { exam_id: number; series_no: number; title: string; questions: number }[];
+      files: { file: string; subject: string; created: unknown[]; skipped: string | null }[];
+      next_no: number;
+    }>("/question-files/series", payload),
+  seriesFromFile: (id: string, payload: Record<string, unknown>) =>
+    api.post<{
+      message: string;
+      created: number;
+      series: { exam_id: number; series_no: number; title: string; questions: number }[];
+      next_no: number;
+    }>(`/question-files/${id}/series`, payload),
   remove: (id: string) => api.delete<{ deleted: boolean }>(`/question-files/${id}`),
 };
 
@@ -483,6 +499,23 @@ export type Exam = {
   max_tab_switches: number;
   show_result_immediately: boolean;
   total_questions: number;
+  /** Set for series tests: {no, subject, file_id, per_test, duration_minutes}. */
+  series?: { no: number; subject?: string; file_id?: string; per_test?: number } | null;
+  series_no?: number | null;
+  subject?: string | null;
+  /** Per-user attempt state added by GET /exams — powers Start vs Resume. */
+  attempt?: {
+    id: number;
+    status: string;
+    in_progress: boolean;
+    answered: number;
+    score: number;
+    max_score: number;
+    percentage: number;
+    correct: number;
+    time_spent_seconds: number;
+    expires_at: string | null;
+  } | null;
   total_marks: number;
   parent_exam_id?: number | null;
   children?: Exam[];

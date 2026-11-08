@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, Final, List, Optional, Set
 
@@ -118,11 +119,69 @@ def list_exams():
         .limit(per_page)
         .all()
     )
+    # Per-user attempt state for the whole page in ONE query — the cards need
+    # it to say "RESUME TEST" instead of "START TEST".
+    uid = None
+    try:
+        uid = int(get_jwt().get("sub"))
+    except (TypeError, ValueError):
+        uid = None
+    attempt_by_exam = {}
+    if uid is not None:
+        page_ids = [e.id for e in items]
+        if page_ids:
+            from app.models.attempt import Attempt
+
+            rows = (
+                Attempt.query.filter(
+                    Attempt.user_id == uid, Attempt.exam_id.in_(page_ids)
+                )
+                .order_by(Attempt.started_at.desc())
+                .all()
+            )
+            for row in rows:
+                prev = attempt_by_exam.get(row.exam_id)
+                # An unfinished attempt always wins — that is what "Resume" means.
+                if prev is None or (prev.status not in ("in_progress",) and row.status == "in_progress"):
+                    attempt_by_exam[row.exam_id] = row
+
+    def _series_of(e):
+        try:
+            rules = json.loads(e.rules_json or "{}")
+        except (TypeError, ValueError, AttributeError):
+            return None
+        if not isinstance(rules, dict):
+            return None
+        series = rules.get("series")
+        return series if isinstance(series, dict) else None
+
     def _item(e):
         # List view only needs summary fields — NOT sections/questions.
         # Loading sections here caused huge JOINs (sections->exam_questions->
         # questions->options) and made the list slow under load.
         d = e.to_dict(include_sections=False)
+        series = _series_of(e)
+        if series:
+            d["series"] = series
+            try:
+                d["series_no"] = int(series.get("no") or 0) or None
+            except (TypeError, ValueError):
+                d["series_no"] = None
+            d["subject"] = series.get("subject")
+        attempt = attempt_by_exam.get(e.id)
+        if attempt is not None:
+            d["attempt"] = {
+                "id": attempt.id,
+                "status": attempt.status,
+                "in_progress": attempt.status == "in_progress",
+                "answered": int(attempt.attempted_count or 0),
+                "score": float(attempt.score or 0.0),
+                "max_score": float(attempt.max_score or 0.0),
+                "percentage": float(attempt.percentage or 0.0),
+                "correct": int(attempt.correct_count or 0),
+                "time_spent_seconds": int(attempt.time_spent_seconds or 0),
+                "expires_at": attempt.expires_at.isoformat() if attempt.expires_at else None,
+            }
         # AUTO coming-soon: an exam is "coming soon" only when it has no
         # questions/tests yet. If it has questions it is active/playable.
         try:
