@@ -1,19 +1,20 @@
 // Cloudflare Worker (static assets) — serves the built Vite app.
 //
-// The Worker connected to this repo builds at the repo root, so:
-//   1. `npm ci && npm run build` runs in ./frontend  (Build command)
-//   2. `npx wrangler deploy` uploads ./frontend/dist (Deploy command)
+// The Worker is connected to this repo and builds at the repo root, so:
+//   Build command  : cd frontend && npm ci && npm run build
+//   Deploy command : npx wrangler deploy
+//   Root directory : / (blank)
 //
-// `single-page-application` is what makes /shop, /admin/sellers etc. deep-link
-// correctly instead of 404-ing on refresh — the same job _redirects does on
-// Cloudflare Pages.
+// `not_found_handling: single-page-application` is what makes /shop,
+// /admin/sellers etc. deep-link correctly instead of 404-ing on refresh.
+// NOTE: valid values for the sibling `html_handling` field are
+// auto-trailing-slash | force-trailing-slash | drop-trailing-slash | none —
+// we simply leave it unset and let wrangler default it.
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
   "name": "cronyzo-exam",
   "compatibility_date": "2025-06-01",
   "assets": {
     "directory": "./frontend/dist",
-    "not_found_handling": "single-page-application",
-    "html_handling": "auto-traverse-html-extension"
+    "not_found_handling": "single-page-application"
   }
 }
