@@ -7,6 +7,11 @@
 //
 // `not_found_handling: single-page-application` is what makes /shop,
 // /admin/sellers etc. deep-link correctly instead of 404-ing on refresh.
+// NOTE: do NOT ship frontend/public/_redirects with this Worker — Workers
+// static assets already do SPA fallback through not_found_handling, and a
+// `/* /index.html 200` rule there is rejected as an infinite redirect loop
+// (code 100324). Only Cloudflare *Pages* needs that file.
+//
 // NOTE: valid values for the sibling `html_handling` field are
 // auto-trailing-slash | force-trailing-slash | drop-trailing-slash | none —
 // we simply leave it unset and let wrangler default it.

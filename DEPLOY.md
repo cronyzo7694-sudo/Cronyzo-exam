@@ -92,8 +92,11 @@ VITE_FIREBASE_SENDER_ID   = …
 VITE_FIREBASE_APP_ID      = …
 ```
 
-4. `frontend/public/_redirects` already contains `/* /index.html 200`, so every
-   route (`/shop`, `/admin/sellers`, …) deep-links correctly on refresh.
+4. SPA routing: on **Cloudflare Pages** add `frontend/public/_redirects` with
+   `/*  /index.html  200`. On a **Worker with static assets** do the opposite —
+   delete that file (Cloudflare rejects it as an infinite redirect loop,
+   error 100324) and use `not_found_handling: "single-page-application"` in
+   `wrangler.jsonc`, which is what this repo ships.
 5. On the API (Render), set
    `CORS_ORIGINS=https://cronyzo-exam.pages.dev,https://your-domain.com`
    — comma separated, no spaces, or the browser blocks every request.
