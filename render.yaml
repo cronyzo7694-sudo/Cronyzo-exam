@@ -16,7 +16,10 @@ services:
     region: singapore
     rootDir: backend
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: gunicorn -b 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 wsgi:app
+    # ONE worker on purpose: the Telegram poller starts inside the worker, and
+    # two workers would poll the same bot twice (duplicate replies, fought-over
+    # offsets). Threads give the concurrency instead.
+    startCommand: gunicorn -b 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 180 wsgi:app
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:

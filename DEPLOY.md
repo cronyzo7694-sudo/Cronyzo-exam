@@ -152,4 +152,9 @@ fails with `auth/unauthorized-domain`.
 
 - The API sleeps after ~15 min of inactivity; the first request takes ~30 s.
 - Neon free DB also suspends when idle — same cold-start story.
-- Keep `--workers 2` at most: the Telegram poller starts once per worker.
+- **One gunicorn worker only** (`--workers 1 --threads 8`): the Telegram poller
+  starts inside a worker, so two workers poll the same bot twice — duplicate
+  replies and fought-over update offsets. Threads carry the concurrency.
+- Render region **Singapore** matches your Neon database (`ap-southeast-1`);
+  a mismatched region adds ~0.5 s to *every* query, and boot does a few hundred.
+- Gunicorn `--timeout 180` so a cold worker boot never looks like a hang.
