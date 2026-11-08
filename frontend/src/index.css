@@ -393,3 +393,41 @@
   .cz-slide-out { opacity: 0 !important; }
   .cz-slide-in  { opacity: 1 !important; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Space for the mobile bottom bar
+   ---------------------------------------------------------------
+   The tab bar is fixed, so anything at the end of a page (pagination, the last
+   card, a "signed in as" line) used to slide underneath it. One variable decides
+   the gap and every layout uses the utility — no page can get it wrong again.
+   `env(safe-area-inset-bottom)` keeps it right on iPhones with a home bar.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --bottom-nav-height: 64px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.pb-bottom-nav {
+  padding-bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + 1.25rem);
+}
+
+@media (min-width: 1024px) {
+  /* No tab bar from lg up — the sidebar takes over, so drop the gap. */
+  .pb-bottom-nav {
+    padding-bottom: 1.5rem;
+  }
+}
+
+/* Admin slide-over drawers: stop above the tab bar, otherwise their Save
+   button sits behind it on a phone. */
+.drawer-above-nav {
+  top: 0;
+  bottom: calc(var(--bottom-nav-height) + var(--safe-bottom));
+  height: auto;
+}
+
+@media (min-width: 1024px) {
+  .drawer-above-nav {
+    bottom: 0;
+  }
+}

@@ -265,7 +265,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
       <SiteHeader />
 
       {/* ══ Page ══════════════════════════════════════════════ */}
-      <main className="flex-1 pb-20 lg:pb-0">{children}</main>
+      <main className="pb-bottom-nav flex-1">{children}</main>
 
       {/* Bottom padding on mobile so the fixed nav never covers content */}
       <SiteFooter />

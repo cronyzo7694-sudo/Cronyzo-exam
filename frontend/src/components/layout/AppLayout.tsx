@@ -393,7 +393,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           )}
 
           {/* ── Page content ──────────────────── */}
-          <main className="flex-1 overflow-y-auto scrollbar-thin">
+          <main className="pb-bottom-nav flex-1 overflow-y-auto scrollbar-thin">
             {children}
           </main>
 

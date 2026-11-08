@@ -70,7 +70,7 @@ function SlideOver({ title, open, onClose, children }: { title: string; open: bo
   return (
     <>
       {open && <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={onClose} />}
-      <div className={`fixed top-0 right-0 z-50 h-full w-full sm:w-[520px] bg-card border-l shadow-2xl transform transition-transform duration-300 ease-in-out ${open ? "translate-x-0" : "translate-x-full"}`}>
+      <div className={`drawer-above-nav fixed right-0 z-50 w-full sm:w-[520px] bg-card border-l shadow-2xl transform transition-transform duration-300 ease-in-out ${open ? "translate-x-0" : "translate-x-full"}`}>
         <div className="flex items-center justify-between px-6 py-4 border-b">
           <h2 className="text-lg font-bold">{title}</h2>
           <button onClick={onClose} className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"><span dangerouslySetInnerHTML={{ __html: I.xmark }} /></button>
