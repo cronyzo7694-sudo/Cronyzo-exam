@@ -167,6 +167,7 @@ def _register_blueprints(app: Flask) -> None:
     from app.routes.admin_site import admin_site_bp
     from app.routes.chat import chat_bp, contact_bp
     from app.routes.teaching import files_bp, teaching_bp
+    from app.routes.uploads import images_bp, uploads_bp
 
     # URL prefixes are part of the public API contract — do not change
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -205,6 +206,9 @@ def _register_blueprints(app: Flask) -> None:
     app.register_blueprint(contact_bp, url_prefix="/api/contact")
     app.register_blueprint(teaching_bp, url_prefix="/api/teaching")
     app.register_blueprint(files_bp, url_prefix="/api/files")
+    # Image uploads (cover photos, product shots, avatars) + their delivery
+    app.register_blueprint(uploads_bp, url_prefix="/api/uploads")
+    app.register_blueprint(images_bp, url_prefix="/api/images")
 
     # --------------------------------------------
     # EXTENSION POINT: Register additional blueprints here

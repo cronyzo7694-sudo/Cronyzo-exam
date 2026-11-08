@@ -35,6 +35,7 @@ import { SupportInboxPage } from "@/pages/admin/SupportInboxPage";
 import { CourseStudioPage } from "@/pages/CourseStudioPage";
 import { ChatPage } from "@/pages/ChatPage";
 import { MessagesPage } from "@/pages/admin/MessagesPage";
+import { AccountPage } from "@/pages/AccountPage";
 import { ProfilePage } from "@/pages/ProfilePage";
 import { SettingsPage } from "@/pages/SettingsPage";
 
@@ -325,6 +326,15 @@ const analyticsRoute = createRoute({
   component: AnalyticsPage,
 });
 
+const accountRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/account",
+  // Signed in is enough here — a guest can still rename their session, and the
+  // page itself explains how to turn it into a permanent account.
+  beforeLoad: () => requireAuth(),
+  component: AccountPage,
+});
+
 const profileRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/profile",
@@ -610,7 +620,8 @@ const routeTree = rootRoute.addChildren([
     examDetailRoute,
     attemptsRoute,
     analyticsRoute,
-    profileRoute,
+    accountRoute,
+  profileRoute,
     settingsRoute,
     resultsRoute,
     cartRoute,

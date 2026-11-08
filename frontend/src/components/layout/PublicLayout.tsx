@@ -29,6 +29,12 @@ import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   ArrowRight,
   BookOpen,
+  ChevronDown,
+  ClipboardList,
+  LayoutDashboard,
+  LogOut,
+  Settings as SettingsIcon,
+  UserRound,
   GraduationCap,
   Home,
   LayoutGrid,
@@ -289,7 +295,8 @@ export function MobileBottomNav({
   const navigate = useNavigate();
   const { user } = useAuthStore();
 
-  const youTarget = user ? "/dashboard" : "/login";
+  // "You" is the account tab: identity, orders, password — not just a dashboard.
+  const youTarget = user ? "/account" : "/login";
 
   const items: {
     key: string;
@@ -332,7 +339,10 @@ export function MobileBottomNav({
       label: "You",
       icon: UserIcon,
       onClick: () => navigate({ to: youTarget as any }),
-      active: isActive(pathname, "/dashboard") || isActive(pathname, "/login"),
+      active:
+        isActive(pathname, "/account") ||
+        isActive(pathname, "/dashboard") ||
+        isActive(pathname, "/login"),
       badge: cartCount,
     },
   ];
@@ -598,9 +608,10 @@ export { LayoutGrid };
 export function SiteHeader() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const { user, isGuest } = useAuthStore();
+  const { user, isGuest, logout, capabilities } = useAuthStore();
   const { content } = useSite();
   const features = content.features;
   const signedIn = Boolean(user);
@@ -626,6 +637,7 @@ export function SiteHeader() {
   useEffect(() => {
     setSearchOpen(false);
     setMenuOpen(false);
+    setAccountOpen(false);
   }, [pathname]);
 
   // Lock scroll while a sheet is open
@@ -665,12 +677,104 @@ export function SiteHeader() {
             <CartPill />
 
             {signedIn ? (
-              <Button asChild size="sm">
-                <Link to="/dashboard">
-                  {isGuest() ? "Continue" : "Dashboard"}
-                  <ArrowRight className="ml-1.5 hidden h-3.5 w-3.5 sm:inline" />
-                </Link>
-              </Button>
+              /* Identity, not a mystery button: the avatar opens the account
+                 menu on every width, so name / email / password are always one
+                 tap away — the thing people could never find before. */
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setAccountOpen((v) => !v)}
+                  aria-label="Account menu"
+                  aria-expanded={accountOpen}
+                  className="flex h-10 items-center gap-2 rounded-xl border bg-card pl-1 pr-2 transition-colors hover:border-primary/40"
+                >
+                  {user?.avatar_url ? (
+                    <img
+                      src={user.avatar_url}
+                      alt=""
+                      className="h-8 w-8 rounded-lg object-cover"
+                    />
+                  ) : (
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-[13px] font-bold text-primary">
+                      {(user?.full_name || user?.email || "S").charAt(0).toUpperCase()}
+                    </span>
+                  )}
+                  <span className="hidden max-w-[104px] truncate text-[12.5px] font-bold sm:block">
+                    {user?.full_name || (isGuest() ? "Guest" : "Account")}
+                  </span>
+                  <ChevronDown
+                    className={cn(
+                      "h-3.5 w-3.5 text-muted-foreground transition-transform",
+                      accountOpen && "rotate-180",
+                    )}
+                  />
+                </button>
+
+                {accountOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setAccountOpen(false)}
+                      aria-hidden="true"
+                    />
+                    <div className="absolute right-0 z-50 mt-2 w-[264px] overflow-hidden rounded-2xl border bg-card shadow-2xl">
+                      <div className="border-b bg-muted/30 px-3.5 py-3">
+                        <p className="truncate text-[13px] font-bold">
+                          {user?.full_name || "Guest"}
+                        </p>
+                        <p className="truncate text-[11.5px] text-muted-foreground">
+                          {user?.email || "Guest session — this browser only"}
+                        </p>
+                      </div>
+                      <div className="p-1.5">
+                        {[
+                          { to: "/account", label: "My account", icon: UserRound },
+                          { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+                          { to: "/orders", label: "My orders", icon: ClipboardList },
+                          {
+                            to: "/sell/dashboard",
+                            label: "Seller studio",
+                            icon: Store,
+                            show:
+                              Boolean(
+                                capabilities?.can_publish_books ||
+                                  capabilities?.can_publish_courses ||
+                                  user?.role === "admin",
+                              ),
+                          },
+                          { to: "/settings", label: "Settings", icon: SettingsIcon },
+                        ]
+                          .filter((item) => item.show !== false)
+                          .map((item) => {
+                            const Icon = item.icon;
+                            return (
+                              <Link
+                                key={item.to}
+                                to={item.to}
+                                onClick={() => setAccountOpen(false)}
+                                className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[12.5px] font-semibold text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                              >
+                                <Icon className="h-4 w-4" />
+                                {item.label}
+                              </Link>
+                            );
+                          })}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAccountOpen(false);
+                            logout();
+                          }}
+                          className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-[12.5px] font-semibold text-destructive transition-colors hover:bg-destructive/10"
+                        >
+                          <LogOut className="h-4 w-4" />
+                          Sign out
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             ) : (
               /* ONE call to action, on every width. The login page carries
                  "Create an account", so this never needs to say "Get started". */
@@ -743,8 +847,36 @@ export function SiteHeader() {
               </button>
             </div>
 
+            {signedIn && (
+              <Link
+                to="/account"
+                onClick={() => setMenuOpen(false)}
+                className="mb-4 flex items-center gap-3 rounded-2xl border bg-card px-3 py-3"
+              >
+                {user?.avatar_url ? (
+                  <img src={user.avatar_url} alt="" className="h-10 w-10 rounded-full object-cover" />
+                ) : (
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
+                    {(user?.full_name || user?.email || "S").charAt(0).toUpperCase()}
+                  </span>
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-bold">
+                    {user?.full_name || "Guest"}
+                  </span>
+                  <span className="block truncate text-[11.5px] text-muted-foreground">
+                    {user?.email || "Guest session"}
+                  </span>
+                </span>
+                <ArrowRight className="h-4 w-4 shrink-0 text-primary" />
+              </Link>
+            )}
+
             <nav className="grid grid-cols-2 gap-2" aria-label="All sections">
               {[
+                ...(signedIn
+                  ? [{ to: "/account", label: "My account", icon: UserRound }]
+                  : []),
                 { to: "/courses", label: "Courses", icon: GraduationCap },
                 { to: "/books", label: "Books", icon: BookOpen },
                 { to: "/shop", label: "Shop", icon: ShoppingBag },
@@ -803,11 +935,18 @@ export function SiteHeader() {
 
             <div className="mt-4 grid grid-cols-2 gap-2">
               {signedIn ? (
-                <Button asChild className="col-span-2">
-                  <Link to="/dashboard" onClick={() => setMenuOpen(false)}>
-                    Go to dashboard
-                  </Link>
-                </Button>
+                <>
+                  <Button asChild variant="outline" className="col-span-2">
+                    <Link to="/account" onClick={() => setMenuOpen(false)}>
+                      My account
+                    </Link>
+                  </Button>
+                  <Button asChild className="col-span-2">
+                    <Link to="/dashboard" onClick={() => setMenuOpen(false)}>
+                      Go to dashboard
+                    </Link>
+                  </Button>
+                </>
               ) : (
                 <>
                   <Button asChild variant="outline">

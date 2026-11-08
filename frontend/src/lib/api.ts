@@ -214,6 +214,36 @@ export const authApi = {
     password?: string;
   }) =>
     api.put<{ message: string; user: User }>("/auth/me", data),
+  /** Change password — the server asks for the current one first. */
+  changePassword: (current_password: string, new_password: string) =>
+    api.post<{ message: string; user: User }>("/auth/change-password", {
+      current_password,
+      new_password,
+    }),
+};
+
+// ---------- Images (covers, product photos, avatars) ----------
+export type UploadedImage = {
+  id: string;
+  url: string;
+  mime: string;
+  size_bytes: number;
+  width: number;
+  height: number;
+  deduplicated?: boolean;
+};
+
+/**
+ * One image, straight from the phone's gallery or the desktop's file picker.
+ * The server resizes it to a web-safe JPEG (long edge 1600 px) before storing
+ * it, so a 6 MB camera photo comes back as ~150 KB and pages stay fast.
+ */
+export const uploadsApi = {
+  image: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post<UploadedImage>("/uploads/image", form);
+  },
 };
 
 // ---------- Subjects / Chapters ----------

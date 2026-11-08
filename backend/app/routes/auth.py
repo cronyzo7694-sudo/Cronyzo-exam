@@ -11,6 +11,7 @@ Public URL prefixes (stable)::
     POST /api/auth/refresh
     GET  /api/auth/me
     PUT  /api/auth/me
+    POST /api/auth/change-password
     GET  /api/auth/methods
 """
 
@@ -934,6 +935,104 @@ def claim_guest_session():
 
 def _is_guest_user(user: User) -> bool:
     return (user.role or "") == "guest" or (getattr(user, "auth_provider", None) == "guest")
+
+
+@auth_bp.post("/change-password")
+@jwt_required()
+def change_password():
+    """Change the signed-in user's password.
+
+    Body::
+
+        {"current_password": "…", "new_password": "…"}
+
+    The old password is required whenever the account already has one, so a
+    stolen browser session (or an unlocked phone) cannot quietly lock the real
+    owner out. Accounts created through Google have no password yet — for them
+    the session alone is enough to *set* a first password, which is what turns
+    a Google-only account into a normal email+password login.
+
+    Answers ``200`` with the refreshed user payload on success, ``400`` with a
+    human message otherwise (``wrong_current_password`` / ``weak_password``).
+    """
+    user = get_current_user() or User.query.get(int(get_jwt_identity() or 0))
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if _is_guest_user(user):
+        return (
+            jsonify(
+                {
+                    "error": "guest_account",
+                    "message": "Guest sessions have no password — create a free account to set one.",
+                }
+            ),
+            403,
+        )
+
+    data = _json_body()
+    current = data.get("current_password") or ""
+    new_password = data.get("new_password") or ""
+
+    has_password = bool(getattr(user, "password_hash", None))
+    if has_password:
+        if not user.check_password(current):
+            return (
+                jsonify(
+                    {
+                        "error": "wrong_current_password",
+                        "message": "Current password is not correct.",
+                    }
+                ),
+                400,
+            )
+    if not isinstance(new_password, str) or len(new_password) > _MAX_PASSWORD_LEN:
+        return jsonify({"error": "Invalid password"}), 400
+    if has_password and new_password == current:
+        return (
+            jsonify(
+                {
+                    "error": "same_password",
+                    "message": "The new password must be different from the current one.",
+                }
+            ),
+            400,
+        )
+
+    ok, msg = is_strong_password(new_password)
+    if not ok:
+        return jsonify({"error": "weak_password", "message": msg}), 400
+
+    try:
+        user.set_password(new_password)
+        # A password-first account keeps its identity; a Google/phone account
+        # gains one so it can also sign in with email + password from now on.
+        if not getattr(user, "auth_provider", None):
+            user.auth_provider = "password"
+        db.session.commit()
+    except (ValueError, TypeError) as exc:
+        db.session.rollback()
+        return jsonify({"error": str(exc) or "Invalid password"}), 400
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+        logger.exception("change_password commit failed user=%s", user.id)
+        return jsonify({"error": "Could not save the new password"}), 500
+
+    logger.info("password changed user=%s", user.id)
+    try:
+        from app.services.notification_engine import notify
+
+        notify(
+            user_id=user.id,
+            category="password_changed",
+            template_code="password_changed",
+            variables={"name": user.full_name},
+            channels=["in_app", "email"],
+            priority="high",
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("password_changed notify skipped", exc_info=True)
+
+    return jsonify({"message": "Password updated", "user": user.to_dict()})
 
 
 @auth_bp.put("/me")

@@ -12,7 +12,6 @@ import {
   BookOpen,
   CheckCircle2,
   GraduationCap,
-  ImageIcon,
   Package,
   Save,
 } from "lucide-react";
@@ -21,6 +20,7 @@ import { booksApi, coursesApi, shopApi } from "@/lib/commerce";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ShopkeeperGate } from "@/components/seller/ShopkeeperGate";
+import { ImagePicker } from "@/components/ImagePicker";
 
 /* ═══════════════════════════════════════════════════════════
    Shared form kit
@@ -233,22 +233,13 @@ function CreateProductPageInner() {
           </Field>
         </div>
 
-        <Field
-          label="Image URL"
-          hint="Paste a Cloudinary URL once you wire up media storage."
-        >
-          <div className="flex gap-2">
-            <input
-              value={form.image_url}
-              onChange={(e) => setForm({ ...form, image_url: e.target.value })}
-              placeholder="https://res.cloudinary.com/…/image.jpg"
-              className={inputCls}
-            />
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-muted text-muted-foreground">
-              <ImageIcon className="h-4 w-4" />
-            </span>
-          </div>
-        </Field>
+        <ImagePicker
+          label="Product photo"
+          shape="photo"
+          hint="The main shot buyers see in the shop and on the product page."
+          value={form.image_url}
+          onChange={(url) => setForm({ ...form, image_url: url })}
+        />
 
         {create.isError && (
           <p className="text-sm font-medium text-destructive">
@@ -414,14 +405,13 @@ function CreateCoursePageInner() {
           </Field>
         </div>
 
-        <Field label="Thumbnail URL" hint="A 16:10 image works best.">
-          <input
-            value={form.thumbnail_url}
-            onChange={(e) => setForm({ ...form, thumbnail_url: e.target.value })}
-            placeholder="https://res.cloudinary.com/…/course.jpg"
-            className={inputCls}
-          />
-        </Field>
+        <ImagePicker
+          label="Course cover photo"
+          shape="photo"
+          hint="Wide 16:10 image works best. Upload from your device or paste a link."
+          value={form.thumbnail_url}
+          onChange={(url) => setForm({ ...form, thumbnail_url: url })}
+        />
 
         {create.isError && (
           <p className="text-sm font-medium text-destructive">
@@ -695,23 +685,15 @@ function CreateBookPageInner() {
               className={inputCls}
             />
           </Field>
-          <Field label="Cover image URL" hint="Paste any image link — Drive, Cloudinary, Imgur.">
-            <div className="flex items-center gap-2">
-              <input
-                value={form.cover_url}
-                onChange={(e) => setForm({ ...form, cover_url: e.target.value })}
-                placeholder="https://res.cloudinary.com/…/cover.jpg"
-                className={inputCls}
-              />
-              {/^https?:\/\//i.test(form.cover_url) && (
-                <img
-                  src={form.cover_url}
-                  alt=""
-                  className="h-10 w-8 shrink-0 rounded border object-cover"
-                />
-              )}
-            </div>
-          </Field>
+          <div className="sm:col-span-2">
+            <ImagePicker
+              label="Book cover photo"
+              shape="cover"
+              hint="The cover buyers see in the library grid. Portrait (3:4) looks best — upload from your phone or paste a Drive/Imgur link."
+              value={form.cover_url}
+              onChange={(url) => setForm({ ...form, cover_url: url })}
+            />
+          </div>
         </div>
 
         <Field label="Description">

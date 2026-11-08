@@ -92,6 +92,7 @@ const navigation: NavGroup[] = [
   {
     label: "Account",
     items: [
+      { to: "/account", label: "My Account", icon: UserRound },
       { to: "/profile", label: "Profile", icon: UserRound },
       { to: "/settings", label: "Settings", icon: Settings },
     ],
