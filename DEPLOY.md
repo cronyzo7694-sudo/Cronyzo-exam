@@ -2,12 +2,23 @@
 
 Repo: `github.com/cronyzo7694-sudo/Cronyzo-exam` · Blueprint: [`render.yaml`](render.yaml)
 
-Two services, both free tier:
+**Recommended split (both free, and fast):**
 
-| Service | What it is | Address |
+| Piece | Host | Why |
 | --- | --- | --- |
-| `cronyzo-api` | Flask API (`gunicorn wsgi:app`) | `https://cronyzo-api.onrender.com` |
-| `cronyzo-web` | Vite build, static files + SPA rewrite | `https://cronyzo-web.onrender.com` → your domain |
+| Frontend (Vite build) | **Cloudflare Pages** | free custom domain, global CDN, **never sleeps**, unlimited bandwidth |
+| API (Flask) | **Render free** | free Python + Postgres-friendly; kept awake by a ping (see §6) |
+| Database | **Neon** (already live) | free, serverless Postgres |
+| DNS / SSL | **Cloudflare** (free) | free HTTPS + proxy, works with any registrar |
+
+> **Do not put the whole app on Render free and expect it to feel fast.** A free
+> Render web service sleeps after ~15 minutes of no traffic and the next visitor
+> waits **30–50 s**. Cloudflare Pages has no such thing — a static site is served
+> from the edge in milliseconds. So: static frontend on Cloudflare, API on Render
+> with a keep-alive ping. Total cost until you buy hosting: **₹0 + domain**.
+>
+> Cloudflare Pages gives you a **custom domain for free** (Render charges for
+> custom domains on free instances) — that alone settles the question.
 
 ---
 
@@ -55,28 +66,70 @@ Render gets the same string as an env var.
    `CRONYZO_SEED_DEMO` switch — leave it unset in production).
 4. Check `https://cronyzo-api.onrender.com/api/health` → `{"status":"ok"}`.
 
-## 4. Wire the frontend to the API
+## 4. Frontend on Cloudflare Pages (free, fast, no cold start)
 
-`VITE_API_URL` must be the API's public URL, not `/api`:
+1. Cloudflare dashboard → **Workers & Pages → Create → Pages → Connect to Git**
+   → pick `Cronyzo-exam`.
+2. Build settings:
+
+| Setting | Value |
+| --- | --- |
+| Framework preset | `Vite` (or None) |
+| Root directory | `frontend` |
+| Build command | `npm ci && npm run build` |
+| Build output directory | `dist` |
+| Node version | `20` (env var `NODE_VERSION=20`) |
+
+3. Environment variables (Production **and** Preview):
 
 ```
-VITE_API_URL = https://cronyzo-api.onrender.com/api
+VITE_API_URL              = https://cronyzo-api.onrender.com/api
+VITE_FIREBASE_API_KEY     = …same as frontend/.env…
+VITE_FIREBASE_AUTH_DOMAIN = …
+VITE_FIREBASE_PROJECT_ID  = …
+VITE_FIREBASE_STORAGE_BUCKET = …
+VITE_FIREBASE_SENDER_ID   = …
+VITE_FIREBASE_APP_ID      = …
 ```
 
-Change it → redeploy `cronyzo-web`. (CORS on the API allows the web origin.)
+4. `frontend/public/_redirects` already contains `/* /index.html 200`, so every
+   route (`/shop`, `/admin/sellers`, …) deep-links correctly on refresh.
+5. On the API (Render), set
+   `CORS_ORIGINS=https://cronyzo-exam.pages.dev,https://your-domain.com`
+   — comma separated, no spaces, or the browser blocks every request.
 
-## 5. Domain
+> Prefer to keep everything on Render? Uncomment the `cronyzo-web` block in
+> `render.yaml` — it does the same job, minus the free custom domain and with
+> no CDN.
 
-1. Buy a domain (Namecheap/GoDaddy/Cloudflare) — e.g. `cronyzo.app`.
-2. Render → `cronyzo-web` → **Settings → Custom Domain** → add
-   `cronyzo.app` and `www.cronyzo.app`.
-3. At your registrar, add the records Render shows you (usually an `A` record
-   for the apex and a `CNAME` for `www`).
-4. **Custom domains on free instances need a paid plan** on Render; if you stay
-   free, use the `*.onrender.com` URL and point the domain later.
-5. Set `PUBLIC_SITE_URL` on `cronyzo-api` to the final `https://` domain, and
-   add it to Firebase → Authentication → **Authorized domains** so Google
-   sign-in keeps working on the new host.
+## 5. Domain (Cloudflare — free SSL, free custom domain)
+
+1. Buy the domain wherever it is cheapest (Cloudflare Registrar sells at cost;
+   Namecheap/GoDaddy work too).
+2. Add the site to Cloudflare (**Add a site**, Free plan) and change the
+   nameservers at your registrar to the two Cloudflare gives you. Wait for
+   "Active" (usually minutes).
+3. Cloudflare Pages → your project → **Custom domains** → add
+   `your-domain.com` and `www.your-domain.com`. DNS records are created for you.
+4. Set `PUBLIC_SITE_URL=https://your-domain.com` on `cronyzo-api`, and add that
+   domain to `CORS_ORIGINS`.
+5. Firebase → Authentication → **Authorized domains** → add the domain (and the
+   `*.pages.dev` host) or Google sign-in fails with `auth/unauthorized-domain`.
+
+## 6. Keep the free API awake (this is what kills "slow")
+
+Render free sleeps after ~15 min idle → 30–50 s cold start for the next visitor.
+
+Fix, free: create a monitor that calls the health endpoint every 10 minutes.
+
+- **cron-job.org** (free) or **UptimeRobot** (free, 5-min interval):
+  - URL: `https://cronyzo-api.onrender.com/api/health`
+  - Method: GET · Interval: 5–10 min · Expect: HTTP 200
+- That keeps one instance warm 24/7 (≈744 h/month, inside Render's 750 h free
+  allowance for a single service).
+
+Without a ping the site still works, it is just slow on the first hit —
+so do set it up before sharing the link with anyone.
 
 ## 6. Google sign-in on the live domain
 
@@ -84,7 +137,7 @@ Firebase console → Authentication → **Settings → Authorized domains** → 
 `cronyzo-web.onrender.com` (and your custom domain). Without this the popup
 fails with `auth/unauthorized-domain`.
 
-## 7. After the first deploy — smoke test
+## 7. Smoke test after the first deploy
 
 1. `/` loads, hero + flag + founder photo render.
 2. Google sign-in completes (no `Invalid Google token`).
