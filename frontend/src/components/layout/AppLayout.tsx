@@ -435,6 +435,11 @@ function Breadcrumb() {
         dashboard: "Dashboard",
         earnings: "Earnings",
       };
+      // Exam cards link to /exams/<id> — an id means nothing to a learner, so
+      // the crumb says "Tests inside" instead of dumping a database number.
+      if (/^\d+$/.test(part)) {
+        return { label: "Tests inside", path: "/" + parts.slice(0, i + 1).join("/") };
+      }
       const label =
         LABELS[part] ||
         part

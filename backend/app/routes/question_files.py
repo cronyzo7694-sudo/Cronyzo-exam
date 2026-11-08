@@ -671,10 +671,18 @@ def _subject_of(record: QuestionFile) -> str:
     return stem[:24].title() or "Test"
 
 
-def _next_series_no() -> int:
-    """Global running number for the SERIES #N badge."""
+def _next_series_no(parent_id: Optional[int] = None) -> int:
+    """Running number for the SERIES #N badge, scoped to one exam's tests.
+
+    Inside an exam the badge restarts at #1 — so "Agniveer Vayu" shows its own
+    #1… and a different exam shows #1… too, exactly like a fresh test series.
+    Without a parent it falls back to a global count.
+    """
+    query = Exam.query.filter(Exam.rules_json.isnot(None))
+    if parent_id is not None:
+        query = query.filter(Exam.parent_exam_id == parent_id)
     highest = 0
-    for exam in Exam.query.filter(Exam.rules_json.isnot(None)).all():
+    for exam in query.all():
         try:
             rules = json.loads(exam.rules_json or "{}")
         except (TypeError, ValueError):
@@ -716,10 +724,61 @@ def _parse_series_options(data: Dict[str, Any]) -> Dict[str, Any]:
         "shuffle": bool(data.get("shuffle", True)),
         "exam_mode": data.get("exam_mode") if data.get("exam_mode") in ("mock", "practice", "pyq", "sectional") else "mock",
         "start_no": _int("start_no", 0, 0, 100000),
+        "parent_id": data.get("parent_id") or data.get("exam_id") or None,
+        "parent_title": (str(data.get("parent_title") or "")).strip()[:200],
+        "parent_status": data.get("parent_status") if data.get("parent_status") in ("draft", "published") else "published",
     }
 
 
-def _build_series_for_file(record: QuestionFile, opts: Dict[str, Any], created_by: Optional[int], start_no: int) -> Dict[str, Any]:
+def _resolve_parent_exam(opts: Dict[str, Any], created_by: Optional[int]) -> Tuple[Optional[int], Optional[Dict[str, Any]]]:
+    """Work out which EXAM the generated tests belong to.
+
+    Returns (parent_id, error). Either an existing exam id was sent, or a title
+    was sent and we create that exam (a published container with no questions of
+    its own). Without either, tests stay top-level — but the UI always asks.
+    """
+    raw = opts.get("parent_id")
+    if raw not in (None, "", 0, "0"):
+        try:
+            parent_id = int(raw)
+        except (TypeError, ValueError):
+            return None, {"error": "bad_parent", "message": "Exam id galat hai."}
+        parent = db.session.get(Exam, parent_id)
+        if parent is None:
+            return None, {"error": "unknown_exam", "message": "Wo exam nahi mila."}
+        if (parent.parent_exam_id or None) is not None:
+            return None, {
+                "error": "nested",
+                "message": "Ye khud ek test hai — tests ko exam ke andar hi daalo, test ke andar nahi.",
+            }
+        return parent_id, None
+
+    title = opts.get("parent_title") or ""
+    if title:
+        parent = Exam(
+            title=title[:255],
+            description=f"{title} — online test series",
+            exam_mode="mock",
+            status=opts.get("parent_status") or "published",
+            duration_seconds=0,
+            created_by=created_by,
+            total_questions=0,
+            total_marks=0.0,
+        )
+        db.session.add(parent)
+        db.session.flush()
+        return parent.id, None
+
+    return None, None
+
+
+def _build_series_for_file(
+    record: QuestionFile,
+    opts: Dict[str, Any],
+    created_by: Optional[int],
+    start_no: int,
+    parent_id: Optional[int] = None,
+) -> Dict[str, Any]:
     """Slice one file's questions into tests. Returns a report dict."""
     report = {"file": record.filename, "subject": _subject_of(record), "created": [], "skipped": None}
 
@@ -759,6 +818,7 @@ def _build_series_for_file(record: QuestionFile, opts: Dict[str, Any], created_b
             default_negative_marks=opts["negative_marks"],
             shuffle_questions=False,  # already shuffled when slicing
             shuffle_options=True,
+            parent_exam_id=parent_id,
             created_by=created_by,
             total_questions=0,
             total_marks=0.0,
@@ -826,6 +886,16 @@ def build_series():
     data = request.get_json(silent=True) or {}
     opts = _parse_series_options(data)
 
+    try:
+        created_by_early = int((get_jwt() or {}).get("sub"))
+    except (TypeError, ValueError):
+        created_by_early = None
+
+    parent_id, parent_error = _resolve_parent_exam(opts, created_by_early)
+    if parent_error:
+        db.session.rollback()
+        return jsonify(parent_error), 400
+
     wanted_ids = data.get("file_ids") or []
     if isinstance(wanted_ids, str):
         wanted_ids = [wanted_ids]
@@ -842,12 +912,12 @@ def build_series():
     except (TypeError, ValueError):
         created_by = None
 
-    next_no = opts["start_no"] or _next_series_no()
+    next_no = opts["start_no"] or _next_series_no(parent_id)
     reports: List[Dict[str, Any]] = []
     made = 0
     try:
         for record in files:
-            report = _build_series_for_file(record, opts, created_by, next_no)
+            report = _build_series_for_file(record, opts, created_by, next_no, parent_id)
             reports.append(report)
             made += len(report["created"])
             next_no += len(report["created"])
@@ -866,6 +936,7 @@ def build_series():
                 "series": flat,
                 "files": reports,
                 "next_no": next_no,
+                "parent_exam_id": parent_id,
             }
         ),
         201,
@@ -886,9 +957,14 @@ def build_series_from_file(file_id: str):
     except (TypeError, ValueError):
         created_by = None
 
-    next_no = opts["start_no"] or _next_series_no()
+    parent_id, parent_error = _resolve_parent_exam(opts, created_by)
+    if parent_error:
+        db.session.rollback()
+        return jsonify(parent_error), 400
+
+    next_no = opts["start_no"] or _next_series_no(parent_id)
     try:
-        report = _build_series_for_file(record, opts, created_by, next_no)
+        report = _build_series_for_file(record, opts, created_by, next_no, parent_id)
         db.session.commit()
     except Exception:  # noqa: BLE001
         db.session.rollback()
@@ -906,6 +982,7 @@ def build_series_from_file(file_id: str):
                 "series": report["created"],
                 "files": [report],
                 "next_no": next_no + made,
+                "parent_exam_id": parent_id,
             }
         ),
         201,

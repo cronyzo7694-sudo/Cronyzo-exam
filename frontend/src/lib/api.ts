@@ -503,6 +503,11 @@ export type Exam = {
   series?: { no: number; subject?: string; file_id?: string; per_test?: number } | null;
   series_no?: number | null;
   subject?: string | null;
+  /** Exam cards carry aggregate counts of the tests inside them. */
+  test_count?: number;
+  question_total?: number;
+  subjects?: string[];
+  progress?: { in_progress: number; completed: number; total: number } | null;
   /** Per-user attempt state added by GET /exams — powers Start vs Resume. */
   attempt?: {
     id: number;

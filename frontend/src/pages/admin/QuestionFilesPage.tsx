@@ -46,6 +46,11 @@ export function QuestionFilesPage() {
     queryFn: () => examsApi.listAll("per_page=100"),
   });
 
+  /** Top-level exams only — tests cannot be nested inside a test. */
+  const topLevelExams = (exams.data ?? []).filter(
+    (exam) => (exam as any).parent_exam_id == null,
+  );
+
   const detail = useQuery({
     queryKey: ["question-file", active],
     queryFn: () => questionFilesApi.get(active as string),
@@ -81,10 +86,16 @@ export function QuestionFilesPage() {
     marks: "1",
     negative_marks: "0.25",
     tests_per_file: "",
+    // Which EXAM the generated tests belong to. Every test lives inside an
+    // exam — that is what keeps the shelf short and the learner unconfused.
+    parent_id: "",
+    parent_title: "",
   });
   const [seriesMsg, setSeriesMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const seriesPayload = () => ({
+    parent_id: series.parent_id ? Number(series.parent_id) : undefined,
+    parent_title: !series.parent_id ? series.parent_title.trim() : undefined,
     per_test: Number(series.per_test || 25),
     duration_minutes: Number(series.duration_minutes || 21),
     marks: Number(series.marks || 1),
@@ -221,7 +232,39 @@ export function QuestionFilesPage() {
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-2.5 sm:grid-cols-5">
+        <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
+          <label className="block">
+            <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+              Kis exam ke andar daalna hai?
+            </span>
+            <select
+              value={series.parent_id}
+              onChange={(e) => setSeries({ ...series, parent_id: e.target.value })}
+              className="h-9 w-full rounded-xl border bg-card px-2.5 text-[12.5px] outline-none focus:border-primary/60"
+            >
+              <option value="">➕ Naya exam banao (neeche naam likho)</option>
+              {topLevelExams.map((exam) => (
+                <option key={exam.id} value={exam.id}>
+                  {exam.title} — {exam.test_count ?? 0} tests
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+              Naye exam ka naam
+            </span>
+            <input
+              value={series.parent_title}
+              disabled={Boolean(series.parent_id)}
+              onChange={(e) => setSeries({ ...series, parent_title: e.target.value })}
+              placeholder="jaise SSC CHSL, SSC CGL, SSC CPO…"
+              className="h-9 w-full rounded-xl border bg-card px-2.5 text-[12.5px] outline-none focus:border-primary/60 disabled:opacity-50"
+            />
+          </label>
+        </div>
+
+        <div className="mt-2.5 grid grid-cols-2 gap-2.5 sm:grid-cols-5">
           {[
             { key: "per_test", label: "Qs per test" },
             { key: "duration_minutes", label: "Minutes" },
@@ -246,7 +289,11 @@ export function QuestionFilesPage() {
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          <Button className="rounded-xl" disabled={seriesAll.isPending} onClick={() => seriesAll.mutate()}>
+          <Button
+            className="rounded-xl"
+            disabled={seriesAll.isPending || (!series.parent_id && !series.parent_title.trim())}
+            onClick={() => seriesAll.mutate()}
+          >
             {seriesAll.isPending ? (
               <>
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Bana rahe hain…
@@ -336,8 +383,10 @@ export function QuestionFilesPage() {
                     size="sm"
                     variant="outline"
                     className="rounded-xl"
-                    disabled={seriesOne.isPending}
-                    title={`${Math.floor((file.question_count || 0) / Number(series.per_test || 25))} tests banenge`}
+                    disabled={seriesOne.isPending || (!series.parent_id && !series.parent_title.trim())}
+                    title={`${Math.floor((file.question_count || 0) / Number(series.per_test || 25))} tests banenge${
+                      series.parent_title ? ` — “${series.parent_title}” ke andar` : ""
+                    }`}
                     onClick={() => seriesOne.mutate(file.id)}
                   >
                     <Layers className="mr-1.5 h-3.5 w-3.5" />

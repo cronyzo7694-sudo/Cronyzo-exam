@@ -145,6 +145,75 @@ def list_exams():
                 if prev is None or (prev.status not in ("in_progress",) and row.status == "in_progress"):
                     attempt_by_exam[row.exam_id] = row
 
+    # For EXAM cards (top-level rows) the learner needs "kitne tests andar hain",
+    # not an empty question count. One grouped query per page keeps it cheap.
+    child_stats: Dict[int, Dict[str, Any]] = {}
+    if any((e.parent_exam_id is None) for e in items):
+        parent_ids = [e.id for e in items if e.parent_exam_id is None]
+        if parent_ids:
+            from app.models.attempt import Attempt as _Attempt
+            from app.models.exam import ExamQuestion as _EQ
+
+            rows = (
+                db.session.query(Exam.parent_exam_id, db.func.count(Exam.id))
+                .filter(Exam.parent_exam_id.in_(parent_ids), Exam.status == "published")
+                .group_by(Exam.parent_exam_id)
+                .all()
+            )
+            for parent_id, count in rows:
+                child_stats[parent_id] = {
+                    "test_count": int(count or 0),
+                    "question_total": 0,
+                    "in_progress": 0,
+                    "completed": 0,
+                }
+            qrows = (
+                db.session.query(Exam.parent_exam_id, db.func.count(_EQ.id))
+                .join(_EQ, _EQ.exam_id == Exam.id)
+                .filter(Exam.parent_exam_id.in_(parent_ids), Exam.status == "published")
+                .group_by(Exam.parent_exam_id)
+                .all()
+            )
+            for parent_id, count in qrows:
+                if parent_id in child_stats:
+                    child_stats[parent_id]["question_total"] = int(count or 0)
+            if uid is not None:
+                arows = (
+                    db.session.query(
+                        Exam.parent_exam_id, _Attempt.status, db.func.count(db.distinct(Exam.id))
+                    )
+                    .join(_Attempt, _Attempt.exam_id == Exam.id)
+                    .filter(Exam.parent_exam_id.in_(parent_ids), _Attempt.user_id == uid)
+                    .group_by(Exam.parent_exam_id, _Attempt.status)
+                    .all()
+                )
+                for parent_id, status, count in arows:
+                    if parent_id not in child_stats:
+                        continue
+                    if status == "in_progress":
+                        child_stats[parent_id]["in_progress"] = int(count or 0)
+                    elif status in ("submitted", "auto_submitted", "evaluated"):
+                        child_stats[parent_id]["completed"] = int(count or 0)
+
+    # Subjects present inside each exam (for the chips on the exam card).
+    if child_stats:
+        srows = (
+            Exam.query.filter(Exam.parent_exam_id.in_(list(child_stats.keys())))
+            .with_entities(Exam.parent_exam_id, Exam.rules_json)
+            .all()
+        )
+        for parent_id, rules_raw in srows:
+            try:
+                rules = json.loads(rules_raw or "{}")
+            except (TypeError, ValueError):
+                continue
+            series = rules.get("series") if isinstance(rules, dict) else None
+            subject = series.get("subject") if isinstance(series, dict) else None
+            if isinstance(subject, str) and subject:
+                bucket = child_stats[parent_id].setdefault("subjects", [])
+                if subject not in bucket:
+                    bucket.append(subject)
+
     def _series_of(e):
         try:
             rules = json.loads(e.rules_json or "{}")
@@ -160,6 +229,17 @@ def list_exams():
         # Loading sections here caused huge JOINs (sections->exam_questions->
         # questions->options) and made the list slow under load.
         d = e.to_dict(include_sections=False)
+        stats = child_stats.get(e.id)
+        if stats and stats.get("test_count"):
+            d["test_count"] = stats["test_count"]
+            d["question_total"] = stats["question_total"]
+            d["progress"] = {
+                "in_progress": stats["in_progress"],
+                "completed": stats["completed"],
+                "total": stats["test_count"],
+            }
+            if stats.get("subjects"):
+                d["subjects"] = sorted(stats["subjects"])
         series = _series_of(e)
         if series:
             d["series"] = series
