@@ -474,9 +474,11 @@ def upload_book_pdf(book_id: int):
 
     Multipart: ``file`` (the PDF) plus optional form fields
     ``is_free_download=true`` and ``price=…``.
-    """
-    from app.services.storage import save_upload
 
+    Uploads are stored with the data (see :mod:`app.services.documents`), so a
+    seller who uploads straight from their phone never loses the file on the
+    next deploy. A Drive/Dropbox link remains an alternative for big files.
+    """
     book = db.session.get(Book, book_id)
     if book is None or not book.is_active:
         return jsonify({"error": "Book not found"}), 404
@@ -491,12 +493,16 @@ def upload_book_pdf(book_id: int):
     body = _json_body()
     file = request.files.get("file")
     if file is not None and file.filename:
-        info, error = save_upload(file, kind="pdf", folder="books")
+        from app.services.documents import internal_url, store_pdf
+
+        stored, error = store_pdf(
+            file, kind="book", book_id=book.id, owner_id=user.id
+        )
         if error:
             return jsonify({"error": error}), 400
-        book.pdf_url = info["url"]
-        book.pdf_name = info["file_name"]
-        book.pdf_size_bytes = int(info["size_bytes"])
+        book.pdf_url = internal_url(stored.id)
+        book.pdf_name = stored.filename
+        book.pdf_size_bytes = int(stored.size_bytes)
     else:
         url = _normalise_file_url(body.get("pdf_url") or body.get("file_url"))
         if not url:
@@ -547,7 +553,6 @@ def upload_book_pdf(book_id: int):
 @roles_required("teacher", "seller", "admin")
 def upload_book_preview_pdf(book_id: int):
     """Attach a free sample PDF (the seller's marketing hook)."""
-    from app.services.storage import save_upload
 
     book = db.session.get(Book, book_id)
     if book is None or not book.is_active:
@@ -563,11 +568,13 @@ def upload_book_preview_pdf(book_id: int):
     if file is None or not file.filename:
         return jsonify({"error": "A sample PDF file is required"}), 400
 
-    info, error = save_upload(file, kind="pdf", folder="previews")
+    from app.services.documents import internal_url, store_pdf
+
+    stored, error = store_pdf(file, kind="preview", book_id=book.id, owner_id=user.id)
     if error:
         return jsonify({"error": error}), 400
 
-    book.preview_pdf_url = info["url"]
+    book.preview_pdf_url = internal_url(stored.id)
     try:
         book.preview_pages = max(0, int(request.form.get("preview_pages") or 0))
     except (TypeError, ValueError):
@@ -634,13 +641,26 @@ def download_book_pdf(book_id: int):
     except Exception:  # noqa: BLE001
         db.session.rollback()
 
+    from app.services.documents import file_id_from_url
+
+    stored_id = file_id_from_url(book.pdf_url)
+    if stored_id:
+        # The PDF lives in our own storage: hand out the gated byte route, never
+        # the internal reference. Same purchase check already passed above.
+        url = f"/api/books/{book.id}/file"
+        file_name = book.pdf_name or f"{book.slug}.pdf"
+    else:
+        url = book.pdf_url  # Drive / Dropbox / seller's own host
+        file_name = book.pdf_name or f"{book.slug}.pdf"
+
     return jsonify(
         {
             "message": "Here is your download",
-            "url": book.pdf_url,
-            "file_name": book.pdf_name or f"{book.slug}.pdf",
+            "url": url,
+            "file_name": file_name,
             "title": book.title,
             "free": bool(book.is_free_download),
+            "hosted": bool(stored_id),
         }
     )
 
@@ -654,10 +674,98 @@ def preview_book_pdf(book_id: int):
     if not book.preview_pdf_url:
         return jsonify({"error": "No free sample for this title", "code": "no_preview"}), 404
 
+    from app.services.documents import file_id_from_url
+
+    url = book.preview_pdf_url
+    if file_id_from_url(url):
+        url = f"/api/books/{book.id}/preview/file"
+
     return jsonify(
         {
-            "url": book.preview_pdf_url,
+            "url": url,
             "pages": int(book.preview_pages or 0),
             "title": book.title,
         }
     )
+
+
+@books_bp.get("/<int:book_id>/file")
+def book_pdf_bytes(book_id: int):
+    """Stream the e-book PDF itself — same gate as ``/download``.
+
+    This is what the in-app reader and the "Download" button use, so the file
+    never has to be publicly addressable.
+    """
+    from flask import Response
+
+    from app.models.order import Order, OrderItem
+    from app.services.documents import file_id_from_url, load_pdf
+
+    book = db.session.get(Book, book_id)
+    if book is None or not book.is_active:
+        return jsonify({"error": "Book not found"}), 404
+
+    stored_id = file_id_from_url(book.pdf_url)
+    if not stored_id:
+        return jsonify({"error": "This listing points at an outside host", "code": "external_file"}), 409
+
+    user = get_current_user()
+    is_owner = user is not None and (
+        (user.role or "") == "admin" or int(book.seller_id) == int(user.id)
+    )
+    has_purchased = False
+    if user is not None:
+        has_purchased = (
+            db.session.query(OrderItem.id)
+            .join(Order, Order.id == OrderItem.order_id)
+            .filter(
+                OrderItem.item_type == "book",
+                OrderItem.item_id == book.id,
+                Order.user_id == user.id,
+                Order.status.in_(("paid", "completed", "shipped", "delivered")),
+            )
+            .first()
+            is not None
+        )
+    if not (book.is_free_download or is_owner or has_purchased):
+        return (
+            jsonify({"error": "Purchase this e-book to read it", "code": "payment_required"}),
+            402,
+        )
+
+    stored = load_pdf(stored_id)
+    if stored is None:
+        return jsonify({"error": "The file for this listing is missing"}), 404
+
+    resp = Response(stored.data, mimetype="application/pdf")
+    resp.headers["Cache-Control"] = "private, max-age=0, no-store"
+    disposition = request.args.get("download")
+    fname = (stored.filename or f"{book.slug}.pdf").replace('"', "")
+    resp.headers["Content-Disposition"] = (
+        f'attachment; filename="{fname}"' if disposition else f'inline; filename="{fname}"'
+    )
+    return resp
+
+
+@books_bp.get("/<int:book_id>/preview/file")
+def book_preview_bytes(book_id: int):
+    """Free sample — readable by anyone, no account, no purchase."""
+    from flask import Response
+
+    from app.services.documents import file_id_from_url, load_pdf
+
+    book = db.session.get(Book, book_id)
+    if book is None or not book.is_active:
+        return jsonify({"error": "Book not found"}), 404
+
+    stored_id = file_id_from_url(book.preview_pdf_url)
+    if not stored_id:
+        return jsonify({"error": "No free sample for this title", "code": "no_preview"}), 404
+    stored = load_pdf(stored_id)
+    if stored is None:
+        return jsonify({"error": "The sample file is missing"}), 404
+
+    resp = Response(stored.data, mimetype="application/pdf")
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    resp.headers["Content-Disposition"] = f'inline; filename="{(stored.filename or "sample.pdf").replace(chr(34), "")}"'
+    return resp

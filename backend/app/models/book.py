@@ -149,7 +149,17 @@ class Book(db.Model):
             "pdf_name": self.pdf_name,
             "pdf_size_bytes": int(self.pdf_size_bytes or 0),
             "has_preview": bool(self.preview_pdf_url),
-            "preview_pdf_url": self.preview_pdf_url,
+            # Never expose an internal storage reference. Link-based samples are
+            # public by design (that is the point of a free sample), so only
+            # those are surfaced; a stored sample is read via the preview route.
+            "preview_pdf_url": (
+                self.preview_pdf_url
+                if (self.preview_pdf_url or "").startswith(("http://", "https://"))
+                else None
+            ),
+            "preview_hosted": bool(
+                (self.preview_pdf_url or "").startswith("cronyzo://file/")
+            ),
             "preview_pages": int(self.preview_pages or 0),
             "is_free_download": bool(self.is_free_download),
             "download_count": int(self.download_count or 0),

@@ -38,7 +38,7 @@ from app.models.notification import (
     NotificationDelivery,
 )
 from app.models.knowledge import QuestionAppearance, KnowledgeIngestionJob
-from app.models.upload import UploadedImage
+from app.models.upload import StoredFile, UploadedImage
 from app.models.user_message import UserMessage
 
 # --- Cronyzo commerce domain (Learn / Read / Shop) ------------------------
@@ -125,6 +125,7 @@ __all__ = [
     "Order",
     "OrderItem",
     "UploadedImage",
+    "StoredFile",
     # Site content
     "SiteSetting",
     "HeroSlide",

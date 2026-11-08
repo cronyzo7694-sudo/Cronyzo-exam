@@ -72,3 +72,40 @@ class UploadedImage(db.Model):
 
     def __repr__(self) -> str:
         return f"<UploadedImage {self.id} {self.width}x{self.height} {self.size_bytes}B>"
+
+
+class StoredFile(db.Model):
+    """A document (the e-book PDF, the free sample) kept with the data.
+
+    Same reasoning as :class:`UploadedImage`: Render's free disk is wiped on
+    every deploy and Cloudinary keys are optional, so a seller's uploaded PDF
+    must not live on local disk. Bytes go to Postgres; delivery is gated by the
+    book routes (paid buyers only), which is why the raw URL is never public.
+
+    ``kind`` is ``"book"`` (the full e-book) or ``"preview"`` (free sample).
+    """
+
+    __tablename__ = "stored_files"
+
+    id = db.Column(db.String(24), primary_key=True, default=new_image_id)
+    owner_id = db.Column(
+        db.Integer,
+        db.ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    kind = db.Column(db.String(20), nullable=False, default="book", index=True)
+    book_id = db.Column(db.Integer, nullable=True, index=True)
+    filename = db.Column(db.String(200), nullable=True)
+    mime = db.Column(db.String(60), nullable=False, default="application/pdf")
+    size_bytes = db.Column(db.Integer, nullable=False, default=0)
+    data = db.Column(db.LargeBinary, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=_utcnow)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "filename": self.filename,
+            "size_bytes": self.size_bytes,
+        }

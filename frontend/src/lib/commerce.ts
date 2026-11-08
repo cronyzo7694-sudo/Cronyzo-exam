@@ -457,6 +457,34 @@ export const booksApi = {
       form,
     );
   },
+  /**
+   * Read the PDF in the browser.
+   *
+   * The bytes are gated by the API (paid buyers, owner, admin, or a free
+   * title), so the file is fetched with the bearer token and shown through a
+   * blob URL — the raw storage route is never left publicly open.
+   *
+   * ``kind: "preview"`` is the free sample and needs no purchase at all.
+   */
+  readBlob: async (bookId: number, kind: "file" | "preview") => {
+    const base = (import.meta.env.VITE_API_URL?.trim() || "/api").replace(/\/$/, "");
+    const path = kind === "preview" ? `/books/${bookId}/preview/file` : `/books/${bookId}/file`;
+    const token = localStorage.getItem("access_token");
+    const res = await fetch(`${base}${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      const err = new Error(
+        (body && (body.error || body.message)) || "Could not open this PDF",
+      ) as Error & { status?: number; code?: string };
+      err.status = res.status;
+      err.code = body?.code;
+      throw err;
+    }
+    return res.blob();
+  },
+
   /** Returns a download URL, or 402 when the e-book has not been bought. */
   downloadPdf: (bookId: number) =>
     api.get<{
@@ -465,6 +493,8 @@ export const booksApi = {
       file_name: string;
       title: string;
       free: boolean;
+      /** true when Cronyzo stores the file itself (gated byte route) */
+      hosted: boolean;
     }>(`/books/${bookId}/download`),
   /** Free sample — public, no account needed. */
   preview: (bookId: number) =>

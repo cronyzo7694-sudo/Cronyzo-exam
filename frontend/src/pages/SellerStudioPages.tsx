@@ -465,7 +465,7 @@ function CreateBookPageInner() {
     is_free_download: false,
     // "link" = the file already lives somewhere else (Google Drive, Dropbox,
     // the seller's own site) and we only store the URL. "upload" = we host it.
-    file_mode: "link" as "link" | "upload",
+    file_mode: "upload" as "link" | "upload",
     file_url: "",
     preview_url: "",
   });

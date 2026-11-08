@@ -56,7 +56,21 @@ export function BookDetailPage() {
     setPdfNote(null);
     try {
       const res = await booksApi.downloadPdf(book.id);
-      window.open(res.url, "_blank", "noopener,noreferrer");
+      if (res.hosted) {
+        // Stored with us: fetch with the token so the file is genuinely gated,
+        // then hand the browser a document it can save.
+        const blob = await booksApi.readBlob(book.id, "file");
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = res.file_name || `${book.slug}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      } else {
+        window.open(res.url, "_blank", "noopener,noreferrer");
+      }
     } catch (err: any) {
       if (err?.status === 402) {
         setPdfNote("Buy this e-book to download the full PDF.");
@@ -68,12 +82,46 @@ export function BookDetailPage() {
     }
   };
 
+  /** Read the full e-book in the browser (same gate as the download). */
+  const [readerBusy, setReaderBusy] = useState(false);
+  const readNow = async () => {
+    if (!book) return;
+    setReaderBusy(true);
+    setPdfNote(null);
+    try {
+      const blob = await booksApi.readBlob(book.id, "file");
+      const url = URL.createObjectURL(
+        new Blob([blob], { type: "application/pdf" }),
+      );
+      window.open(url, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(url), 10 * 60_000);
+    } catch (err: any) {
+      if (err?.status === 402) {
+        setPdfNote("Buy this e-book to read the full PDF — the free sample stays open.");
+      } else {
+        setPdfNote(err?.message || "Could not open the reader");
+      }
+    } finally {
+      setReaderBusy(false);
+    }
+  };
+
   const openPreview = async () => {
     if (!book) return;
     setPdfBusy(true);
+    setPdfNote(null);
     try {
       const res = await booksApi.preview(book.id);
-      window.open(res.url, "_blank", "noopener,noreferrer");
+      if (/^https?:\/\//i.test(res.url)) {
+        window.open(res.url, "_blank", "noopener,noreferrer");
+        return;
+      }
+      const blob = await booksApi.readBlob(book.id, "preview");
+      const url = URL.createObjectURL(
+        new Blob([blob], { type: "application/pdf" }),
+      );
+      window.open(url, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(url), 10 * 60_000);
     } catch (err: any) {
       setPdfNote(err?.message || "No free sample for this title");
     } finally {
@@ -340,6 +388,18 @@ export function BookDetailPage() {
                   >
                     <Download className="mr-2 h-4 w-4" />
                     {pdfBusy ? "Checking…" : "Download PDF (if purchased)"}
+                  </Button>
+                )}
+
+                {/* Read it in place — free title, owner, admin or paid buyer */}
+                {book.has_pdf && (
+                  <Button
+                    className="mt-2 w-full"
+                    onClick={() => void readNow()}
+                    disabled={readerBusy}
+                  >
+                    <BookOpen className="mr-2 h-4 w-4" />
+                    {readerBusy ? "Opening…" : book.is_free_download ? "Read now — free" : "Read now (if purchased)"}
                   </Button>
                 )}
 
