@@ -11,8 +11,22 @@ Flask boots on the first request (or when a worker warms up).
 from __future__ import annotations
 
 import logging
+import os
+import threading
 
 logger = logging.getLogger("cronyzo.wsgi")
+
+# Two Render health-check probes can land at the same instant; without this
+# lock both threads would build the app and the second one would try to
+# register blueprints *after* the first request had already been served
+# ("register_blueprint can no longer be called…").
+_boot_lock = threading.Lock()
+
+
+def _debug_panel_enabled() -> bool:
+    """Off unless asked for. A live shop must not publish /debug to the world."""
+    flag = os.getenv("DEBUG_PANEL", "").strip().lower()
+    return flag in ("1", "true", "yes", "on")
 
 
 class LazyFlaskApp:
@@ -22,20 +36,30 @@ class LazyFlaskApp:
         self._app = None
 
     def _load(self):
-        if self._app is None:
+        if self._app is not None:
+            return self._app
+        with _boot_lock:
+            if self._app is not None:      # another thread won the race
+                return self._app
             logger.warning("Bootstrapping Flask app (first load)…")
             from app import create_app
 
-            self._app = create_app()
-            try:
-                from debug_panel import debug_bp, install_debug_handlers
+            app = create_app()
+            # Everything that mutates the app happens HERE, before the instance
+            # is published, so no request can ever race a blueprint registration.
+            if _debug_panel_enabled():
+                try:
+                    from debug_panel import debug_bp, install_debug_handlers
 
-                self._app.register_blueprint(debug_bp)
-                install_debug_handlers(self._app)
-            except ModuleNotFoundError:
-                pass
-            except Exception:
-                logger.exception("debug panel skipped")
+                    app.register_blueprint(debug_bp)
+                    install_debug_handlers(app)
+                except ModuleNotFoundError:
+                    pass
+                except Exception:
+                    logger.exception("debug panel skipped")
+            else:
+                logger.info("debug panel disabled (set DEBUG_PANEL=1 to enable)")
+            self._app = app
             logger.warning("Flask app ready")
         return self._app
 
