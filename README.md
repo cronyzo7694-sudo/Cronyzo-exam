@@ -46,14 +46,24 @@ npm run dev          # http://localhost:5173
 Vite proxies `/api` → `http://127.0.0.1:5000`, so the browser only ever talks to
 one origin.
 
-### Demo accounts
+### Admin account
 
-| Role | Email | Password |
-|---|---|---|
-| Admin | `admin@examos.local` | `admin123` |
-| Student | `student@examos.local` | `student123` |
-| Teacher | `teacher@examos.local` | `teacher123` |
-| Seller | `seller@examos.local` | `seller123` |
+There is exactly **one** admin, created in the database — never in code:
+
+```
+email    = whatever you set (the live one is your own Gmail)
+password = set by you, from Admin → Settings (or the reset script)
+```
+
+No credentials exist in this repository. `backend/scripts/seed.py` reads the
+bootstrap admin from `CRONYZO_ADMIN_EMAIL` / `CRONYZO_ADMIN_PASSWORD` and
+generates a random password when they are absent, so a public repo can never
+hand out a working login. Demo inventory (and demo logins) only appear when
+`CRONYZO_SEED_DEMO=1`.
+
+> First-user bootstrap: `POST /api/auth/register` honours `role=admin` **only
+> when the database has no admin at all** — that is how the first account is
+> created. Every later attempt is silently downgraded to `student`.
 
 ---
 
@@ -156,10 +166,6 @@ visitor ──► Continue as guest ──► guest session (role=guest)
 
 | Role | Email | Password | Can |
 |---|---|---|---|
-| Admin | `admin@examos.local` | `admin123` | everything + admin panel |
-| Student | `student@examos.local` | `student123` | learn, buy, take exams |
-| Teacher | `teacher@examos.local` | `teacher123` | publish courses + books |
-| Seller | `seller@examos.local` | `seller123` | list products, run a store |
 
 The demo accounts' roles are re-asserted on every boot, so a manual promotion
 during testing can never permanently change the demo.

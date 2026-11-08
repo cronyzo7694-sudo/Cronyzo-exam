@@ -145,7 +145,7 @@ def is_strong_password(password: str) -> Tuple[bool, str]:
     """
     Password policy check for register / profile / admin create.
 
-    Current policy (stable for demo accounts ``admin123`` / ``student123``):
+    Current policy:
         * length >= 6
         * length <= 256 (anti hash-DOS)
 

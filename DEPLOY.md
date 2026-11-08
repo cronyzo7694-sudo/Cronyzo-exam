@@ -161,3 +161,22 @@ fails with `auth/unauthorized-domain`.
 - Render region **Singapore** matches your Neon database (`ap-southeast-1`);
   a mismatched region adds ~0.5 s to *every* query, and boot does a few hundred.
 - Gunicorn `--timeout 180` so a cold worker boot never looks like a hang.
+
+---
+
+## Security notes (read once, apply forever)
+
+1. **No credentials in git.** The repo is public. Seeding reads
+   `CRONYZO_ADMIN_EMAIL` / `CRONYZO_ADMIN_PASSWORD` from the environment and
+   generates a random password when they are missing; the demo dataset (and its
+   demo logins) is off unless `CRONYZO_SEED_DEMO=1`.
+2. **`/api/auth/register` cannot self-promote.** `role=admin` in the payload is
+   honoured only while the database has zero admins (first-run bootstrap); every
+   later request is downgraded to `student`.
+3. **Rotate after any leak.** Changing the password in the DB invalidates the
+   old one immediately — JWTs already issued stay valid until they expire, so
+   keep access tokens short and refresh tokens revocable.
+4. **The debug panel is opt-in.** `DEBUG_PANEL=1` only; a live deployment never
+   publishes `/debug`.
+5. **Secrets live in the host's environment**, not in the repo: Render → Environment,
+   and `.env` / `render-env.txt` stay out of git (both are gitignored / outside the repo).

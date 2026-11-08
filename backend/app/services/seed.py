@@ -4,10 +4,13 @@ Called from the application factory on startup. Safe to invoke multiple times:
 if the canonical admin account already exists, the function returns immediately
 without mutating production data.
 
-Seeds:
-    * admin@examos.local / admin123
-    * student@examos.local / student123
+Seeds (only when CRONYZO_SEED_DEMO=1 — off by default):
+    * an admin account whose credentials come from the environment
+    * a demo student with a random password
     * 4 subjects, chapters, mixed question types, 1 published mock exam
+
+Passwords are NEVER hardcoded: a repository is public forever, and a demo
+password in git is a live backdoor on every deployment that kept the account.
 
 Public contract (stable)::
 
@@ -18,6 +21,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import secrets
 from typing import Any, List, Optional, Sequence
 
 from app.extensions import db
@@ -29,11 +34,12 @@ from app.models.user import User
 
 logger = logging.getLogger("cronyzo.services.seed")
 
-# Canonical bootstrap identity — used as the idempotency sentinel
-_ADMIN_EMAIL = "admin@examos.local"
-_STUDENT_EMAIL = "student@examos.local"
-_ADMIN_PASSWORD = "admin123"
-_STUDENT_PASSWORD = "student123"
+# Canonical bootstrap identity — used as the idempotency sentinel.
+# The password is read from the environment, or generated. Never a literal.
+_ADMIN_EMAIL = os.getenv("CRONYZO_ADMIN_EMAIL", "admin@cronyzo.local")
+_STUDENT_EMAIL = os.getenv("CRONYZO_DEMO_STUDENT_EMAIL", "student@cronyzo.local")
+_ADMIN_PASSWORD = os.getenv("CRONYZO_ADMIN_PASSWORD") or secrets.token_urlsafe(18)
+_STUDENT_PASSWORD = secrets.token_urlsafe(18)
 
 
 def _add_mcq(
@@ -555,17 +561,15 @@ def seed_database() -> None:
         logger.info(
             "Database seeded: %s / %s , %s / %s (exam_id=%s questions=%s)",
             _ADMIN_EMAIL,
-            _ADMIN_PASSWORD,
             _STUDENT_EMAIL,
-            _STUDENT_PASSWORD,
             exam.id,
             exam.total_questions,
         )
         # Keep stdout breadcrumb for operators running python app.py interactively
         print(
             "Database seeded: "
-            f"{_ADMIN_EMAIL} / {_ADMIN_PASSWORD} , "
-            f"{_STUDENT_EMAIL} / {_STUDENT_PASSWORD}"
+            f"{_ADMIN_EMAIL} (password: CRONYZO_ADMIN_PASSWORD) , "
+            f"{_STUDENT_EMAIL} (password: generated)"
         )
 
     except Exception:

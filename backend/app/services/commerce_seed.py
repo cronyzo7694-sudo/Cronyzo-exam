@@ -20,6 +20,7 @@ Public contract (stable)::
 from __future__ import annotations
 
 import logging
+import secrets
 from typing import Any, Dict, List, Optional, Sequence
 
 from app.extensions import db
@@ -1001,7 +1002,7 @@ def _enforce_demo_accounts() -> None:
     _get_or_create_user(
         "student@examos.local",
         "Aarav Mehta",
-        "student123",
+        secrets.token_urlsafe(18),
         "student",
         enforce_role=True,
         city="Delhi",
@@ -1088,7 +1089,7 @@ def seed_commerce() -> None:
         buyer = _get_or_create_user(
             "student@examos.local",
             "Aarav Mehta",
-            "student123",
+            secrets.token_urlsafe(18),
             "student",
             enforce_role=True,
             city="Delhi",
