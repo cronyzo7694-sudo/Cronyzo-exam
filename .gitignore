@@ -1,0 +1,31 @@
+# Secrets — never commit
+.env
+.env.local
+*.env
+!.env.example
+!**/.env.example
+# The Vite env holds only public Firebase web keys — the build needs it
+!frontend/.env
+
+# Python
+__pycache__/
+*.py[cod]
+backend/.venv/
+backend/*.db
+backend/instance/
+backend/uploads/
+.pytest_cache/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/node_modules/
+
+# OS / editors
+.DS_Store
+*.log
+
+# Local DB backups / dumps
+*.db.bak
+*.sqlite3
+backend/dumps/

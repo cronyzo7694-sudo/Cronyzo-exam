@@ -1,0 +1,395 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ══════════════════════════════════════════════════════════
+   CSS Variables — premium theme tokens
+   ══════════════════════════════════════════════════════════ */
+
+@layer base {
+  :root {
+    --background: 0 0% 99%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 221 83% 40%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 30% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214 30% 91%;
+    --input: 214 30% 91%;
+    --ring: 221 83% 40%;
+    --radius: 0.75rem;
+    --sidebar-width: 272px;
+    --sidebar-collapsed: 72px;
+    --header-height: 64px;
+  }
+
+  .dark {
+    --background: 222 47% 4%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 7%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 7%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 222 47% 4%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 12%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 217 33% 17%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217 33% 20%;
+    --input: 217 33% 20%;
+    --ring: 224 76% 48%;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   Base styles
+   ══════════════════════════════════════════════════════════ */
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply antialiased;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: "IBM Plex Sans", "Inter", "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01", "ss03";
+    letter-spacing: -0.01em;
+  }
+
+  /* ── Scrollbar styling ──────────────── */
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.15);
+    border-radius: 9999px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.3);
+  }
+
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* ── Focus ring ─────────────────────── */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring/40 ring-offset-2 ring-offset-background;
+    border-radius: 6px;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   Utilities
+   ══════════════════════════════════════════════════════════ */
+
+@layer utilities {
+  /* Safe area for mobile bottom nav */
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Glass morphism */
+  .glass {
+    background: hsl(var(--background) / 0.7);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+
+  /* Text balance for headings */
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Hide scrollbar but allow scrolling */
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   Animations
+   ══════════════════════════════════════════════════════════ */
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-from-left {
+  from { opacity: 0; transform: translateX(-16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-in {
+  animation: fade-in 0.2s ease-out,
+             slide-up 0.3s ease-out;
+}
+
+.animate-in-fast {
+  animation: fade-in 0.1s ease-out,
+             scale-in 0.15s ease-out;
+}
+
+.animate-slide-down {
+  animation: slide-down 0.2s ease-out;
+}
+
+.animate-slide-left {
+  animation: slide-in-from-left 0.25s ease-out;
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--muted)) 0%,
+    hsl(var(--muted-foreground) / 0.08) 50%,
+    hsl(var(--muted)) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* ══════════════════════════════════════════════════════════
+   Exam player palette
+   ══════════════════════════════════════════════════════════ */
+
+.exam-player-active {
+  overflow: hidden;
+}
+
+.palette-btn {
+  @apply w-10 h-10 rounded-xl text-sm font-semibold flex items-center justify-center border transition-all duration-150;
+}
+
+.palette-not-visited {
+  @apply bg-muted text-muted-foreground border-border;
+}
+
+.palette-not-answered {
+  @apply bg-red-50 text-red-600 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800/30;
+}
+
+.palette-answered {
+  @apply bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800/30;
+}
+
+.palette-marked {
+  @apply bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-800/30;
+}
+
+.palette-marked-answered {
+  @apply bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800/30;
+}
+
+.palette-current {
+  @apply ring-2 ring-primary ring-offset-2 ring-offset-background;
+}
+
+/* ══════════════════════════════════════════════════════════
+   MathJax
+   ══════════════════════════════════════════════════════════ */
+
+.mjx-container {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* ══════════════════════════════════════════════════════════
+   Print
+   ══════════════════════════════════════════════════════════ */
+
+@media print {
+  .sidebar, header, nav, button {
+    display: none !important;
+  }
+  body {
+    background: white !important;
+    color: black !important;
+  }
+}
+
+/* Test-card loading: sliding progress bar */
+@keyframes cardload {
+  0%   { transform: translateX(-100%); }
+  50%  { transform: translateX(120%); }
+  100% { transform: translateX(300%); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   Cronyzo marketing surface — motion primitives
+   ══════════════════════════════════════════════════════════ */
+
+/* ── Drifting gradient blobs behind the hero ────────────── */
+@keyframes cz-blob-drift {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  25%  { transform: translate3d(4%, -3%, 0) scale(1.08); }
+  50%  { transform: translate3d(-3%, 4%, 0) scale(0.95); }
+  75%  { transform: translate3d(-5%, -2%, 0) scale(1.05); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+.cz-blob {
+  animation: cz-blob-drift var(--blob-duration, 28s) ease-in-out infinite;
+  will-change: transform;
+}
+
+/* ── Hero slide transitions ─────────────────────────────── */
+@keyframes cz-slide-enter {
+  from { opacity: 0; transform: scale(1.06) translateX(2.5%); }
+  to   { opacity: 1; transform: scale(1) translateX(0); }
+}
+
+@keyframes cz-slide-leave {
+  from { opacity: 1; transform: scale(1) translateX(0); }
+  to   { opacity: 0; transform: scale(0.97) translateX(-2.5%); }
+}
+
+.cz-slide-in  { animation: cz-slide-enter 0.85s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.cz-slide-out { animation: cz-slide-leave 0.85s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* ── Waving Indian flag ─────────────────────────────────── */
+@keyframes cz-flag-wave {
+  0%,
+  100% { transform: skewY(0deg) scaleY(1); }
+  25%  { transform: skewY(-3.5deg) scaleY(0.97); }
+  50%  { transform: skewY(2.5deg) scaleY(1.02); }
+  75%  { transform: skewY(-1.5deg) scaleY(0.99); }
+}
+
+@keyframes cz-flag-shine {
+  0%   { transform: translateX(-120%); opacity: 0; }
+  35%  { opacity: 0.55; }
+  100% { transform: translateX(160%); opacity: 0; }
+}
+
+@keyframes cz-chakra-spin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to   { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+.cz-flag {
+  animation: cz-flag-wave 4.5s ease-in-out infinite;
+  transform-origin: left center;
+}
+
+.cz-flag-shine {
+  background: linear-gradient(
+    100deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.75) 45%,
+    transparent 90%
+  );
+  animation: cz-flag-shine 5.5s ease-in-out infinite;
+}
+
+.cz-chakra {
+  animation: cz-chakra-spin 14s linear infinite;
+  transform-origin: center;
+}
+
+/* ── Sheen sweeping across the identity strip ───────────── */
+@keyframes cz-strip-sweep {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(420%); }
+}
+
+.cz-strip-sheen {
+  animation: cz-strip-sweep 9s ease-in-out infinite;
+}
+
+/* ── Marquee for the popular-searches / logo strip ──────── */
+@keyframes cz-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+.cz-marquee-track {
+  animation: cz-marquee 28s linear infinite;
+}
+
+.cz-marquee-track:hover {
+  animation-play-state: paused;
+}
+
+/* ── Chat widget pop ────────────────────────────────────── */
+@keyframes cz-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.cz-pop {
+  animation: cz-pop 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ── Accessibility: honour reduced-motion everywhere ────── */
+@media (prefers-reduced-motion: reduce) {
+  .cz-blob,
+  .cz-flag,
+  .cz-flag-shine,
+  .cz-chakra,
+  .cz-strip-sheen,
+  .cz-slide-in,
+  .cz-slide-out,
+  .cz-marquee-track,
+  .cz-pop {
+    animation: none !important;
+  }
+  .cz-slide-out { opacity: 0 !important; }
+  .cz-slide-in  { opacity: 1 !important; }
+}
