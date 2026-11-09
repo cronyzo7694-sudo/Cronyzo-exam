@@ -45,10 +45,12 @@ const ORDER = ["exams", "tests", "topics", "books", "courses", "products", "stor
 const LOCKED_TYPES = new Set(["exam", "test", "subject", "chapter"]);
 
 /** "/exams/4?series=12" → { to: "/exams/4", search: { series: "12" } } */
-function splitHitUrl(url: string): { to: string; search: Record<string, string> } {
+function splitHitUrl(url: string): { to: string; search: Record<string, string | number> } {
   const [path, query = ""] = url.split("?");
-  const search: Record<string, string> = {};
-  for (const [key, value] of new URLSearchParams(query)) search[key] = value;
+  const search: Record<string, string | number> = {};
+  for (const [key, value] of new URLSearchParams(query)) {
+    search[key] = /^\d+$/.test(value) ? Number(value) : value;
+  }
   return { to: path || "/", search };
 }
 

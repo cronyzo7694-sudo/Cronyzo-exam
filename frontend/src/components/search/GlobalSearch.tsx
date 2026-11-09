@@ -44,10 +44,13 @@ import { cn } from "@/lib/utils";
 const RECENT_KEY = "cz_recent_searches";
 
 /** "/exams/4?series=12" → { to: "/exams/4", search: { series: "12" } } */
-function splitHitUrl(url: string): { to: string; search: Record<string, string> } {
+function splitHitUrl(url: string): { to: string; search: Record<string, string | number> } {
   const [path, query = ""] = url.split("?");
-  const search: Record<string, string> = {};
-  for (const [key, value] of new URLSearchParams(query)) search[key] = value;
+  const search: Record<string, string | number> = {};
+  for (const [key, value] of new URLSearchParams(query)) {
+    // keep "?series=12" as a number, otherwise the router quotes it as %2212%22
+    search[key] = /^\d+$/.test(value) ? Number(value) : value;
+  }
   return { to: path || "/", search };
 }
 
