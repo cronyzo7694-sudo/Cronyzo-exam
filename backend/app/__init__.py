@@ -171,6 +171,7 @@ def _register_blueprints(app: Flask) -> None:
     from app.routes.spa import spa_bp
     from app.routes.question_files import question_files_bp
     from app.routes.reviews import reviews_bp
+    from app.routes.search import search_bp
 
     # URL prefixes are part of the public API contract — do not change
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -217,7 +218,29 @@ def _register_blueprints(app: Flask) -> None:
     # available. Registered last so it only claims URLs no API route matched.
     app.register_blueprint(question_files_bp, url_prefix="/api/question-files")
     app.register_blueprint(reviews_bp, url_prefix="/api/reviews")
+    app.register_blueprint(search_bp, url_prefix="/api/search")
     app.register_blueprint(spa_bp)
+
+    # Warm the search index in the background so the very first keystroke of the
+    # first visitor is already fast (the build itself is ~1–3 s of DB reads).
+    def _warm_search_index() -> None:
+        import time as _time
+
+        _time.sleep(1.0)
+        try:
+            with app.app_context():
+                from app.routes.search import _index  # noqa: PLC0415
+
+                _index()
+        except Exception:  # noqa: BLE001 — never block or crash boot
+            pass
+
+    try:
+        import threading as _threading
+
+        _threading.Thread(target=_warm_search_index, name="search-index-warm", daemon=True).start()
+    except Exception:  # noqa: BLE001
+        pass
 
     # --------------------------------------------
     # EXTENSION POINT: Register additional blueprints here

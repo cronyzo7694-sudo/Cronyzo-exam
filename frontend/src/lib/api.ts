@@ -1630,3 +1630,47 @@ export const teachingApi = {
   platformAnnouncements: () =>
     api.get<{ announcements: Announcement[] }>("/teaching/announcements"),
 };
+
+// ---------- Search (the map of the site) ----------
+export type SearchHit = {
+  id: number | null;
+  type: "exam" | "test" | "book" | "course" | "product" | "store" | "subject" | "chapter" | "page";
+  title: string;
+  subtitle?: string | null;
+  url: string;
+  image?: string | null;
+  meta?: string | null;
+  series_no?: number | null;
+  subject?: string | null;
+  questions?: number;
+  minutes?: number | null;
+  marks?: number | null;
+  price?: number;
+  score?: number;
+};
+
+export type SearchResults = {
+  query: string;
+  tokens: string[];
+  groups: Partial<Record<SearchHit["type"] | string, SearchHit[]>>;
+  counts: Record<string, number>;
+  total: number;
+  corrected: string | null;
+  suggestions: string[];
+};
+
+export const searchApi = {
+  /** Grouped results across every section. */
+  query: (q: string, limit = 6) =>
+    api.get<SearchResults>(`/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+  /** Small payload for the dropdown under the box. */
+  suggest: (q: string) =>
+    api.get<{
+      query: string;
+      items: SearchHit[];
+      total: number;
+      corrected: string | null;
+      suggestions: string[];
+      counts: Record<string, number>;
+    }>(`/search/suggest?q=${encodeURIComponent(q)}`),
+};

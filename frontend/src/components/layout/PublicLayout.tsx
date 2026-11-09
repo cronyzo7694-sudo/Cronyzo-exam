@@ -52,6 +52,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { useCartStore } from "@/stores/cartStore";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { GlobalSearch } from "@/components/search/GlobalSearch";
 import { useSite } from "@/lib/site";
 import { TopStrip } from "./TopStrip";
 import { ChatWidget } from "@/components/site/ChatWidget";
@@ -189,7 +190,9 @@ function SearchForm({
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    navigate({ to: "/shop", search: { search: query.trim() } as any });
+    const q = query.trim();
+    if (!q) return;
+    navigate({ to: "/search", search: { q } as any });
     onDone?.();
   };
 
@@ -673,9 +676,23 @@ export function SiteHeader() {
             <NavLinks />
           </nav>
 
-          {/* Search lives IN the header on desktop — never hidden */}
+          {/* Search lives IN the header on desktop — it opens the same palette
+              as ⌘K / the mobile magnifier, so there is one search everywhere. */}
           <div className="ml-auto hidden w-full max-w-sm lg:block">
-            <SearchForm />
+            <button
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              aria-label="Search"
+              className="flex h-10 w-full items-center gap-2 rounded-xl border bg-muted/40 px-3 text-left transition-colors hover:border-primary/40 hover:bg-card"
+            >
+              <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="flex-1 truncate text-sm text-muted-foreground/80">
+                Exam, test, book, course… kuch bhi dhundo
+              </span>
+              <kbd className="shrink-0 rounded border bg-background px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">
+                ⌘K
+              </kbd>
+            </button>
           </div>
 
           <div className="ml-auto flex items-center gap-2 lg:ml-0">
@@ -816,31 +833,8 @@ export function SiteHeader() {
         {/* ══ Identity strip ══════════════════════════════════ */}
         <TopStrip />
       </header>
-      {/* ══ Search overlay (mobile) ═══════════════════════════ */}
-      {searchOpen && (
-        <div className="fixed inset-0 z-[60] lg:hidden">
-          <div
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            onClick={() => setSearchOpen(false)}
-            aria-hidden="true"
-          />
-          <div className="cz-pop relative mx-auto mt-20 w-[min(92vw,560px)] rounded-2xl border bg-card p-4 shadow-2xl">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-sm font-bold">Search Cronyzo</p>
-              <button
-                type="button"
-                onClick={() => setSearchOpen(false)}
-                className="rounded-lg p-1 text-muted-foreground hover:text-foreground"
-                aria-label="Close search"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <SearchForm autoFocus onDone={() => setSearchOpen(false)} />
-            <PopularSearches onPick={() => setSearchOpen(false)} />
-          </div>
-        </div>
-      )}
+      {/* ══ Global search palette (mobile + desktop, ⌘K) ═══════ */}
+      <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
 
       {/* ══ Full menu sheet (mobile) ═══════════════════════════ */}
       {menuOpen && (

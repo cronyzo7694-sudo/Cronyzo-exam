@@ -14,6 +14,7 @@ import { DashboardPage } from "@/pages/DashboardPage";
 import { CronyzoDashboardPage } from "@/pages/CronyzoDashboardPage";
 import { SellerApplyPage } from "@/pages/SellerApplyPage";
 import { ExamsPage } from "@/pages/ExamsPage";
+import { SearchPage } from "@/pages/SearchPage";
 import { ExamDetailPage } from "@/pages/ExamDetailPage";
 import { ExamPlayerPage } from "@/pages/ExamPlayerPage";
 import { ResultPage } from "@/pages/ResultPage";
@@ -302,6 +303,17 @@ const legacyDashboardRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/dashboard/exams",
   component: DashboardPage,
+});
+
+/* Public: search is the map of the site — a visitor who has not signed in
+   must still be able to find a book or a test. */
+const searchRoute = createRoute({
+  getParentRoute: () => publicRoute,
+  path: "/search",
+  component: SearchPage,
+  validateSearch: (search: Record<string, unknown>) => ({
+    q: typeof search.q === "string" ? search.q : "",
+  }),
 });
 
 const examsRoute = createRoute({
@@ -626,6 +638,7 @@ const routeTree = rootRoute.addChildren([
     termsRoute,
     privacyRoute,
     refundRoute,
+    searchRoute,
   ]),
   appRoute.addChildren([
     dashboardRoute,
