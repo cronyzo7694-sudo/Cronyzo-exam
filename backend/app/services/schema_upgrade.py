@@ -124,7 +124,7 @@ _REPLY_COLUMNS: Sequence[Tuple[str, str]] = (
 #  the code's tag, the pass is skipped entirely (2 tiny queries instead of 100).
 #  Bump _SCHEMA_TAG whenever a model gains a column/table.
 # ══════════════════════════════════════════════════════════════════════════
-_SCHEMA_TAG = "2026-11-08.reviews+series"
+_SCHEMA_TAG = "2026-11-09.demo-cleanup"
 
 # Column metadata is fetched once per table per process, not per column.
 _COLUMN_CACHE: dict = {}

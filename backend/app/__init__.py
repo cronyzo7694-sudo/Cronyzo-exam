@@ -509,6 +509,13 @@ def _bootstrap_database(app: Flask) -> None:
                 logger.exception("ensure_additive_schema failed")
                 # Non-fatal for brand-new DBs where create_all already applied models
 
+        if not skip_seed and not _database_is_empty_of_real_data():
+            logger.warning(
+                "CRONYZO_SEED_DEMO is set but this database already holds real data — "
+                "skipping the demo seed (use backend/scripts/clean_demo_data.py to audit)."
+            )
+            skip_seed = True
+
         if not skip_seed:
             try:
                 from app.services.seed import seed_database
@@ -539,6 +546,42 @@ def _bootstrap_database(app: Flask) -> None:
             ensure_default_templates()
         except Exception:
             logger.debug("notification templates seed skipped", exc_info=True)
+
+
+
+# Demo content must never appear on a real deployment, even if someone leaves
+# CRONYZO_SEED_DEMO=1 in the environment by mistake (that is exactly how sample
+# books, courses, products and a "SSC CHSL Style Mock Test — Demo" reached the
+# live catalogue once). The env flag is now only half the permission: the other
+# half is an empty database.
+_DEMO_EMAIL_DOMAINS = ("@cronyzo.local", "@examos.local")
+
+
+def _database_is_empty_of_real_data() -> bool:
+    """True only when nothing a real person made exists yet."""
+    try:
+        from sqlalchemy import text as _text
+
+        def _count(sql: str) -> int:
+            try:
+                return int(db.session.execute(_text(sql)).scalar() or 0)
+            except Exception:
+                db.session.rollback()
+                return 0
+
+        like = " OR ".join(
+            [f"email ILIKE '%{domain}'" for domain in _DEMO_EMAIL_DOMAINS]
+        )
+        real_users = _count(f"SELECT COUNT(*) FROM users WHERE NOT ({like})")
+        if real_users:
+            return False
+        for table in ("questions", "exams", "books", "courses", "products", "orders"):
+            if _count(f"SELECT COUNT(*) FROM {table}"):
+                return False
+        return True
+    except Exception:
+        logger.debug("could not inspect database before seeding", exc_info=True)
+        return False
 
 
 def _start_background_workers(app: Flask) -> None:
