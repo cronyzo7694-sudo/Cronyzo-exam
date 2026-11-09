@@ -61,8 +61,8 @@ export function ExamDetailPage() {
   const loadFromPayload = useExamPlayerStore((s) => s.loadFromPayload);
   const reset = useExamPlayerStore((s) => s.reset);
 
-  const { series } = useSearch({ from: "/app/exams/$examId" }) as { series?: string };
-  const [search, setSearch] = useState(series ?? "");
+  const { series } = useSearch({ from: "/app/exams/$examId" }) as { series?: number | string };
+  const [search, setSearch] = useState(series === undefined || series === null ? "" : String(series));
   const [subject, setSubject] = useState("all");
   const [filter, setFilter] = useState<Filter>("all");
   const [page, setPage] = useState(1);

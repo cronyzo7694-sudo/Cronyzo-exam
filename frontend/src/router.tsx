@@ -327,12 +327,15 @@ const examDetailRoute = createRoute({
   path: "/exams/$examId",
   /* `?series=12` is how a search hit for one particular test lands on that
      test instead of the top of a 100-card list. */
-  validateSearch: (s: Record<string, unknown>): { series?: string } => ({
-    series:
-      typeof s.series === "string" || typeof s.series === "number"
-        ? String(s.series)
-        : undefined,
-  }),
+  /* Numbers stay numbers: a string here would be serialised as ?series=%2212%22. */
+  validateSearch: (s: Record<string, unknown>): { series?: number | string } => {
+    if (typeof s.series === "number") return { series: s.series };
+    if (typeof s.series === "string" && s.series.trim()) {
+      const asNumber = Number(s.series);
+      return { series: Number.isFinite(asNumber) ? asNumber : s.series };
+    }
+    return { series: undefined };
+  },
   component: ExamDetailPage,
 });
 
