@@ -44,10 +44,20 @@ const ORDER = ["exams", "tests", "topics", "books", "courses", "products", "stor
 
 const LOCKED_TYPES = new Set(["exam", "test", "subject", "chapter"]);
 
+/** "/exams/4?series=12" → { to: "/exams/4", search: { series: "12" } } */
+function splitHitUrl(url: string): { to: string; search: Record<string, string> } {
+  const [path, query = ""] = url.split("?");
+  const search: Record<string, string> = {};
+  for (const [key, value] of new URLSearchParams(query)) search[key] = value;
+  return { to: path || "/", search };
+}
+
+
 function HitRow({ hit, signedIn }: { hit: SearchHit; signedIn: boolean }) {
   return (
     <Link
-      to={hit.url as any}
+      to={splitHitUrl(hit.url).to as any}
+      search={splitHitUrl(hit.url).search as any}
       className="flex items-center gap-3 rounded-xl border bg-card px-3 py-2.5 transition-colors hover:border-primary/40 hover:bg-muted/40"
     >
       {hit.image ? (

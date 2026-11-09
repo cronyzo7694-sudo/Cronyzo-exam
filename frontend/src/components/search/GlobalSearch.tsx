@@ -43,6 +43,15 @@ import { cn } from "@/lib/utils";
 
 const RECENT_KEY = "cz_recent_searches";
 
+/** "/exams/4?series=12" → { to: "/exams/4", search: { series: "12" } } */
+function splitHitUrl(url: string): { to: string; search: Record<string, string> } {
+  const [path, query = ""] = url.split("?");
+  const search: Record<string, string> = {};
+  for (const [key, value] of new URLSearchParams(query)) search[key] = value;
+  return { to: path || "/", search };
+}
+
+
 const TYPE_META: Record<
   string,
   { label: string; icon: typeof Zap; tone: string }
@@ -128,7 +137,8 @@ export function GlobalSearch({
       if (query) pushRecent(query);
       onClose();
       setRaw("");
-      navigate({ to: url as any });
+      const target = splitHitUrl(url);
+      navigate({ to: target.to, search: target.search } as any);
     },
     [navigate, onClose],
   );
