@@ -15,7 +15,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import {
   ArrowLeft,
   BookOpenCheck,
@@ -55,12 +55,14 @@ const FILTERS: { key: Filter; label: string }[] = [
 
 export function ExamDetailPage() {
   const { examId } = useParams({ from: "/app/exams/$examId" });
+  // Arriving from search (?series=12) pre-filters the card list to that test.
   const id = Number(examId);
   const navigate = useNavigate();
   const loadFromPayload = useExamPlayerStore((s) => s.loadFromPayload);
   const reset = useExamPlayerStore((s) => s.reset);
 
-  const [search, setSearch] = useState("");
+  const { series } = useSearch({ from: "/app/exams/$examId" }) as { series?: string };
+  const [search, setSearch] = useState(series ?? "");
   const [subject, setSubject] = useState("all");
   const [filter, setFilter] = useState<Filter>("all");
   const [page, setPage] = useState(1);

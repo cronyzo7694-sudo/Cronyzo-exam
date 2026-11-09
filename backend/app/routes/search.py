@@ -323,7 +323,11 @@ def _load_exams(docs: List[Dict[str, Any]]) -> None:
                 "test" if is_test else "exam",
                 row.id,
                 row.title,
-                f"/exams/{row.parent_exam_id if is_test else row.id}",
+                (
+                    f"/exams/{row.parent_exam_id}?series={series_no}"
+                    if is_test and series_no is not None
+                    else f"/exams/{row.parent_exam_id if is_test else row.id}"
+                ),
                 subtitle=(
                     f"Series #{series_no} · {subject}" if series_no and subject
                     else ("Series test" if is_test else _first_line(row.description))

@@ -325,6 +325,14 @@ const examsRoute = createRoute({
 const examDetailRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/exams/$examId",
+  /* `?series=12` is how a search hit for one particular test lands on that
+     test instead of the top of a 100-card list. */
+  validateSearch: (s: Record<string, unknown>): { series?: string } => ({
+    series:
+      typeof s.series === "string" || typeof s.series === "number"
+        ? String(s.series)
+        : undefined,
+  }),
   component: ExamDetailPage,
 });
 
