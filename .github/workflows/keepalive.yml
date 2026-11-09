@@ -1,0 +1,40 @@
+# Keeps the free Render API awake.
+#
+# Render's free instance sleeps after 15 minutes of no traffic, and the first
+# request after that pays a cold boot (~7 s now that the schema pass is cached,
+# but still enough for a visitor to bounce). This pings /api/health every 10
+# minutes so the app is warm when a real person opens it.
+#
+# Nothing secret is used — the health endpoint is public and returns no data.
+# Note: GitHub pauses scheduled workflows after ~60 days of repository
+# inactivity; any push restarts the schedule.
+
+name: keep-api-warm
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: keep-api-warm
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Ping Cronyzo API
+        run: |
+          set -u
+          for attempt in 1 2 3; do
+            code=$(curl -s -o /dev/null -m 90 -w "%{http_code}" https://cronyzo-api.onrender.com/api/health || echo 000)
+            echo "attempt $attempt → HTTP $code"
+            if [ "$code" = "200" ]; then
+              echo "API warm ✅"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "API did not answer 200 — Render may be restarting. Not failing the run."

@@ -62,13 +62,52 @@ function applySession(res: {
   };
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
-  user: null,
-  capabilities: null,
-  loading: false,
-  initialized: false,
+/* ── Boot without waiting on the network ──────────────────────────────────
+   The old boot called GET /auth/session before rendering the first screen. On
+   a sleeping free-tier API that was 20-30 s of "Loading workspace…" and people
+   left. Now the last known identity is restored from localStorage immediately
+   (so the shell paints with the right avatar/role), and the session is verified
+   in the background. A dead token still logs out — but only on a real 401, not
+   on a slow network. */
+const USER_CACHE_KEY = "cz_user_cache";
 
-  setUser: (user) => set({ user }),
+function readUserCache(): { user: User; capabilities: Session["capabilities"] | null } | null {
+  try {
+    const raw = localStorage.getItem(USER_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.user) return null;
+    return { user: parsed.user as User, capabilities: parsed.capabilities ?? null };
+  } catch {
+    return null;
+  }
+}
+
+function writeUserCache(user: User | null, capabilities: Session["capabilities"] | null) {
+  try {
+    if (!user) localStorage.removeItem(USER_CACHE_KEY);
+    else localStorage.setItem(USER_CACHE_KEY, JSON.stringify({ user, capabilities }));
+  } catch {
+    /* storage full / private mode — cache is only an optimisation */
+  }
+}
+
+const cachedAtBoot = typeof localStorage !== "undefined" ? readUserCache() : null;
+const hasTokenAtBoot =
+  typeof localStorage !== "undefined" && Boolean(localStorage.getItem("access_token"));
+
+export const useAuthStore = create<AuthState>((set, get) => ({
+  user: cachedAtBoot?.user ?? null,
+  capabilities: cachedAtBoot?.capabilities ?? null,
+  loading: false,
+  // Instant: if we know who you are (or know nobody is signed in) there is
+  // nothing to wait for. Only a token without a cache needs the server first.
+  initialized: Boolean(cachedAtBoot) || !hasTokenAtBoot,
+
+  setUser: (user) => {
+    set({ user });
+    writeUserCache(user, get().capabilities);
+  },
 
   isGuest: () => {
     const u = get().user;
@@ -156,6 +195,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: () => {
     clearTokens();
+    writeUserCache(null, null);
     set({ user: null, capabilities: null, initialized: true });
   },
 
@@ -163,11 +203,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const session = await authApi.session();
       set({ user: session.user, capabilities: session.capabilities });
-    } catch {
-      // The session endpoint is the source of truth; if it fails the token
-      // is dead, so drop it rather than keep a half-signed-in shell.
-      clearTokens();
-      set({ user: null, capabilities: null });
+      writeUserCache(session.user, session.capabilities);
+    } catch (error: any) {
+      // Only a real "your token is dead" answer should sign someone out. A
+      // timeout / cold start / offline phone must not wipe the session.
+      const status = Number(error?.status ?? 0);
+      if (status === 401 || status === 403) {
+        clearTokens();
+        writeUserCache(null, null);
+        set({ user: null, capabilities: null });
+      }
     }
   },
 
@@ -176,6 +221,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!token) {
       set({ user: null, capabilities: null, initialized: true });
       return;
+    }
+    // Cached identity → render now, verify later.
+    if (!get().initialized) {
+      const cached = readUserCache();
+      if (cached) set({ user: cached.user, capabilities: cached.capabilities, initialized: true });
     }
     await get().refreshSession();
     set({ initialized: true });

@@ -23,21 +23,65 @@ function normalizeFlag(name: string): string {
   return `ENABLE_${n.toUpperCase().replace(/\s+/g, "_")}`;
 }
 
+/* ── Never block the first paint on this call ────────────────────────────
+   Feature flags are "nice to have": the app works with defaults. So the last
+   successful config is restored from localStorage instantly, the network call
+   gets a short deadline, and failure is silent. */
+const CONFIG_CACHE_KEY = "cz_platform_config";
+const CONFIG_TIMEOUT_MS = 6000;
+
+function readConfigCache(): PlatformPublicConfig | null {
+  try {
+    const raw = localStorage.getItem(CONFIG_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.app_name || parsed?.features ? (parsed as PlatformPublicConfig) : null;
+  } catch {
+    return null;
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("config timeout")), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+const cachedConfig = typeof localStorage !== "undefined" ? readConfigCache() : null;
+
 export const usePlatformStore = create<PlatformState>((set, get) => ({
-  config: null,
-  features: {},
-  loaded: false,
+  config: cachedConfig,
+  features: cachedConfig?.features || {},
+  // With a cache we are "loaded" before the first frame.
+  loaded: Boolean(cachedConfig),
   loadError: null,
 
   bootstrap: async () => {
+    // Mark loaded immediately so nothing waits for the network this frame.
+    set({ loaded: true });
     try {
-      const cfg = await platformApi.config();
+      const cfg = await withTimeout(platformApi.config(), CONFIG_TIMEOUT_MS);
       set({
         config: cfg,
         features: cfg.features || {},
         loaded: true,
         loadError: null,
       });
+      try {
+        localStorage.setItem(CONFIG_CACHE_KEY, JSON.stringify(cfg));
+      } catch {
+        /* ignore quota errors */
+      }
     } catch (e: any) {
       // Platform config is additive — app must still boot if endpoint missing
       set({

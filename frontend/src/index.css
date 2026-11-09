@@ -431,3 +431,9 @@
     bottom: 0;
   }
 }
+
+/* Boot progress line (see Bootstrap in main.tsx) */
+@keyframes cz-boot {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}

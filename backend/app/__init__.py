@@ -480,7 +480,22 @@ def _bootstrap_database(app: Flask) -> None:
         # Import models so metadata is registered on db.Model.metadata
         from app import models  # noqa: F401
 
-        if not skip_create:
+        # FAST BOOT: create_all + the additive-schema pass each talk to the DB
+        # dozens of times. On a remote Postgres that was ~95 s of dead time on
+        # every cold start — the splash screen users were bouncing from. The
+        # pass stamps a tag in app_meta; when it matches we skip straight to
+        # serving. Bump _SCHEMA_TAG in schema_upgrade.py when models change.
+        schema_current = False
+        try:
+            from app.services.schema_upgrade import schema_is_current
+
+            schema_current = schema_is_current()
+        except Exception:
+            schema_current = False
+
+        if schema_current:
+            logger.info("schema already current — skipping create_all/upgrade (fast boot)")
+        elif not skip_create:
             try:
                 db.create_all()
             except Exception:

@@ -45,34 +45,34 @@ function Bootstrap({ children }: { children: React.ReactNode }) {
   }, [bootstrapAuth, bootstrapPlatform]);
 
   React.useEffect(() => {
-    if (platformLoaded) {
-      document.title = appName();
-    }
+    if (platformLoaded) document.title = appName();
   }, [platformLoaded, appName]);
 
-  if (!initialized || !platformLoaded) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-6 animate-in">
-          <img
-            src="/favicon.svg"
-            alt="Cronyzo"
-            className="h-16 w-16 rounded-xl bg-white shadow-lg"
-          />
-          <div className="flex flex-col items-center gap-2">
-            <span className="text-lg font-bold tracking-tight text-foreground">
-              Cronyzo
-            </span>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" />
-              Loading workspace…
-            </div>
-          </div>
+  /* ── No blocking splash ────────────────────────────────────────────────
+     The whole app used to sit behind a full-screen "Loading workspace…" until
+     /auth/session and /platform/config answered. On a free-tier API waking up
+     that is 20-30 s of nothing, and visitors leave. The shell now paints on the
+     first frame and those two calls fill it in. Only a returning signed-in user
+     whose cache is empty waits — and even that is capped at 2.5 s. */
+  const [giveUpWaiting, setGiveUpWaiting] = React.useState(false);
+  React.useEffect(() => {
+    if (initialized) return;
+    const timer = setTimeout(() => setGiveUpWaiting(true), 2500);
+    return () => clearTimeout(timer);
+  }, [initialized]);
+
+  const stillWarming = !initialized && !giveUpWaiting;
+
+  return (
+    <>
+      {stillWarming && (
+        <div className="fixed inset-x-0 top-0 z-[200] h-0.5 overflow-hidden bg-primary/15">
+          <div className="h-full w-1/3 animate-[cz-boot_1.1s_ease-in-out_infinite] bg-primary" />
         </div>
-      </div>
-    );
-  }
-  return <>{children}</>;
+      )}
+      {children}
+    </>
+  );
 }
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

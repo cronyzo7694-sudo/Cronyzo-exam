@@ -116,23 +116,91 @@ _REPLY_COLUMNS: Sequence[Tuple[str, str]] = (
 )
 
 
+# ══════════════════════════════════════════════════════════════════════════
+#  BOOT COST — this module used to run every single statement on every boot.
+#  Against a remote Postgres that meant ~80 seconds before the first request
+#  could be answered (Render cold start + splash screen the user stares at).
+#  Now the whole pass is stamped with a tag: if the stored tag already matches
+#  the code's tag, the pass is skipped entirely (2 tiny queries instead of 100).
+#  Bump _SCHEMA_TAG whenever a model gains a column/table.
+# ══════════════════════════════════════════════════════════════════════════
+_SCHEMA_TAG = "2026-11-08.reviews+series"
+
+# Column metadata is fetched once per table per process, not per column.
+_COLUMN_CACHE: dict = {}
+_TABLE_CACHE: dict = {"names": None}
+
+
+def _inspector():
+    return inspect(db.session.get_bind())
+
+
 def _existing_columns(table: str) -> set:
+    if table in _COLUMN_CACHE:
+        return _COLUMN_CACHE[table]
     try:
-        bind = db.session.get_bind()
-        insp = inspect(bind)
-        return {c["name"] for c in insp.get_columns(table)}
+        cols = {c["name"] for c in _inspector().get_columns(table)}
     except Exception:
         logger.exception("inspect columns failed for %s", table)
-        return set()
+        cols = set()
+    _COLUMN_CACHE[table] = cols
+    return cols
+
+
+def _column_types(table: str) -> dict:
+    try:
+        return {c["name"]: str(c["type"]).upper() for c in _inspector().get_columns(table)}
+    except Exception:
+        return {}
 
 
 def _table_exists(table: str) -> bool:
+    if _TABLE_CACHE["names"] is None:
+        try:
+            _TABLE_CACHE["names"] = set(_inspector().get_table_names())
+        except Exception:
+            _TABLE_CACHE["names"] = set()
+    return table in _TABLE_CACHE["names"]
+
+
+def _meta_table_ready() -> bool:
     try:
-        bind = db.session.get_bind()
-        insp = inspect(bind)
-        return table in insp.get_table_names()
+        db.session.execute(
+            text("CREATE TABLE IF NOT EXISTS app_meta (k VARCHAR(64) PRIMARY KEY, v TEXT)")
+        )
+        db.session.commit()
+        return True
     except Exception:
+        db.session.rollback()
         return False
+
+
+def schema_is_current(tag: str = _SCHEMA_TAG) -> bool:
+    """True when this exact schema pass has already done its work on this DB."""
+    try:
+        if not _meta_table_ready():
+            return False
+        row = db.session.execute(text("SELECT v FROM app_meta WHERE k = 'schema_tag'")).first()
+        return bool(row and row[0] == tag)
+    except Exception:
+        db.session.rollback()
+        return False
+
+
+def _stamp_schema(tag: str = _SCHEMA_TAG) -> None:
+    try:
+        _meta_table_ready()
+        db.session.execute(
+            text(
+                "INSERT INTO app_meta (k, v) VALUES ('schema_tag', :tag) "
+                "ON CONFLICT (k) DO UPDATE SET v = :tag"
+            ),
+            {"tag": tag},
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        logger.warning("could not stamp schema tag (next boot will re-check)")
 
 
 def ensure_additive_schema() -> None:
@@ -210,6 +278,9 @@ def ensure_additive_schema() -> None:
         ):
             if not (_table_exists(table) and col in _existing_columns(table)):
                 continue
+            # Already TEXT? Then there is nothing to widen — skip the round trip.
+            if "TEXT" in (_column_types(table).get(col) or ""):
+                continue
             try:
                 db.session.execute(
                     text(f"ALTER TABLE {table} ALTER COLUMN {col} TYPE TEXT")
@@ -248,3 +319,5 @@ def ensure_additive_schema() -> None:
                 db.session.commit()
             except Exception:
                 db.session.rollback()
+
+    _stamp_schema()
