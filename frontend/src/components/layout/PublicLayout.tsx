@@ -31,6 +31,7 @@ import {
   BookOpen,
   ChevronDown,
   ClipboardList,
+  Download,
   FileCode2,
   LayoutDashboard,
   LogOut,
@@ -54,6 +55,7 @@ import { useCartStore } from "@/stores/cartStore";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { GlobalSearch } from "@/components/search/GlobalSearch";
+import { InstallPrompt, requestInstall } from "@/components/pwa/InstallPrompt";
 import { useSite } from "@/lib/site";
 import { TopStrip } from "./TopStrip";
 import { ChatWidget } from "@/components/site/ChatWidget";
@@ -837,6 +839,9 @@ export function SiteHeader() {
       {/* ══ Global search palette (mobile + desktop, ⌘K) ═══════ */}
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
 
+      {/* ══ "Install app" sheet (Android prompt / iPhone steps) ═══ */}
+      <InstallPrompt />
+
       {/* ══ Full menu sheet (mobile) ═══════════════════════════ */}
       {menuOpen && (
         <div className="fixed inset-0 z-[60] lg:hidden">
@@ -911,6 +916,18 @@ export function SiteHeader() {
                 );
               })}
             </nav>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                requestInstall();
+              }}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-3 text-[13px] font-bold text-primary"
+            >
+              <Download className="h-4 w-4" />
+              Cronyzo app install karo
+            </button>
 
             {/* Footer links, folded into the menu — phones get an app, not a
                 shrunken desktop page. */}

@@ -18,6 +18,23 @@ const queryClient = new QueryClient({
   },
 });
 
+/* ── Installable app ────────────────────────────────────────────────────────
+   The manifest + icons live in /public, the worker in /public/sw.js. Registering
+   it here makes Cronyzo installable and lets the shell open without a network
+   (a student's own HTML test file lives on the device, so their paper works
+   offline). /api/ traffic is never cached by the worker. */
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("/sw.js", { scope: "/" })
+      .then((registration) => {
+        // pick up a new deploy on the next visit instead of serving old code
+        registration.update().catch(() => undefined);
+      })
+      .catch(() => undefined);
+  });
+}
+
 const mathJaxConfig = {
   loader: { load: ["input/tex", "output/chtml"] },
   tex: {

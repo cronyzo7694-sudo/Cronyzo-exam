@@ -25,9 +25,13 @@ Rules
 from __future__ import annotations
 
 import logging
+import mimetypes
 from pathlib import Path
 
 from flask import Blueprint, jsonify, send_from_directory
+
+# Flask does not know the PWA manifest by default; wrong type = "not installable".
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 logger = logging.getLogger("cronyzo.spa")
 
@@ -82,6 +86,14 @@ def static_or_spa(filename: str):
         return jsonify({"error": "Not found"}), 404
 
     if candidate.is_file():
+        # The service worker and the manifest must never be cached long: a stale
+        # worker keeps users on old code after every deploy.
+        if filename == "sw.js":
+            resp = _send(filename, "no-cache")
+            resp.headers["Service-Worker-Allowed"] = "/"
+            return resp
+        if filename == "manifest.webmanifest":
+            return _send(filename, "no-cache")
         cache = (
             "public, max-age=31536000, immutable"
             if filename.startswith("assets/")

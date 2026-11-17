@@ -22,7 +22,15 @@ rm -rf "$ROOT/backend/static_site"
 mkdir -p "$ROOT/backend/static_site"
 cp -R "$ROOT/frontend/dist/." "$ROOT/backend/static_site/"
 
-echo "▸ published $(du -sh "$ROOT/backend/static_site" | cut -f1)"
+# Stamp the service worker with a build id so every deploy retires the previous
+# cache instead of serving last week's shell.
+BUILD_STAMP="$(date -u +%Y%m%d%H%M%S)"
+if [[ -f "$ROOT/backend/static_site/sw.js" ]]; then
+  sed -i "s/__CZ_BUILD__/${BUILD_STAMP}/g" "$ROOT/backend/static_site/sw.js"
+fi
+if grep -q "sw.js" "$ROOT/backend/static_site/index.html" 2>/dev/null; then :; fi
+
+echo "▸ published $(du -sh "$ROOT/backend/static_site" | cut -f1) (build ${BUILD_STAMP})"
 
 if [[ "${1:-}" == "--commit" ]]; then
   cd "$ROOT"
