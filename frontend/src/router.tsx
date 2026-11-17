@@ -54,6 +54,7 @@ import { StoresPage } from "@/pages/StoresPage";
 import { StorefrontPage } from "@/pages/StorefrontPage";
 import { SellerProfilePage } from "@/pages/SellerProfilePage";
 import { SellLandingPage } from "@/pages/SellLandingPage";
+import { MyTestFilesPage } from "@/pages/MyTestFilesPage";
 import { SellerDashboardPage } from "@/pages/SellerDashboardPage";
 import {
   CreateBookPage,
@@ -577,6 +578,13 @@ const adminMessagesRoute = createRoute({
 /* ── Static legal/support pages ──────────────────────────── */
 /* Public by design: payment-gateway and app-store compliance both require
    Terms / Privacy / Refund / Contact to be readable without an account. */
+/** A student's own HTML test file — picked from the phone, opened full-screen. */
+const myTestFilesRoute = createRoute({
+  getParentRoute: () => publicRoute,
+  path: "/my-tests",
+  component: MyTestFilesPage,
+});
+
 const helpRoute = createRoute({
   getParentRoute: () => publicRoute,
   path: "/help",
@@ -650,6 +658,7 @@ const routeTree = rootRoute.addChildren([
     privacyRoute,
     refundRoute,
     searchRoute,
+    myTestFilesRoute,
   ]),
   appRoute.addChildren([
     dashboardRoute,

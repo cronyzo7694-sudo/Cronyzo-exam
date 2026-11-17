@@ -85,7 +85,7 @@ function HitRow({ hit, signedIn }: { hit: SearchHit; signedIn: boolean }) {
         </span>
       </span>
       {hit.meta && (
-        <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] font-bold text-muted-foreground">
+        <span className="max-w-[38%] shrink-0 truncate rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] font-bold text-muted-foreground">
           {hit.meta}
         </span>
       )}

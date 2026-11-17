@@ -31,6 +31,7 @@ import {
   BookOpen,
   ChevronDown,
   ClipboardList,
+  FileCode2,
   LayoutDashboard,
   LogOut,
   Settings as SettingsIcon,

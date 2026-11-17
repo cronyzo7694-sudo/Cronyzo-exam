@@ -341,7 +341,9 @@ export function GlobalSearch({
                             </span>
                           </span>
                           {hit.meta && (
-                            <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] font-bold text-muted-foreground">
+                            // capped: a long "25 Q · 21 min · 25 marks · Series #12"
+                            // must never squeeze the title into "P…"
+                            <span className="max-w-[40%] shrink-0 truncate rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] font-bold text-muted-foreground">
                               {hit.meta}
                             </span>
                           )}

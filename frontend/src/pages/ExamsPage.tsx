@@ -14,6 +14,7 @@ import { Link } from "@tanstack/react-router";
 import {
   ArrowRight,
   BookOpenCheck,
+  FileCode2,
   Clock,
   GraduationCap,
   LibraryBig,
@@ -266,6 +267,23 @@ export function ExamsPage() {
           phir uska test.
         </p>
       </header>
+
+      {/* Students often get a paper as a single HTML file — one tap from here. */}
+      <Link
+        to="/my-tests"
+        className="flex items-center gap-3 rounded-2xl border border-primary/25 bg-primary/5 px-3 py-3 transition-colors hover:border-primary/50"
+      >
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <FileCode2 className="h-5 w-5" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[13.5px] font-bold">Apni HTML test file kholo</span>
+          <span className="block truncate text-[11.5px] text-muted-foreground">
+            Phone/laptop se file chuno · fullscreen · answers reload par bhi safe
+          </span>
+        </span>
+        <ArrowRight className="h-4 w-4 shrink-0 text-primary" />
+      </Link>
 
       <div className="relative">
         <SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/60" />

@@ -139,6 +139,7 @@ _SYNONYMS: Dict[str, List[str]] = {
 _PAGES: List[Dict[str, str]] = [
     {"title": "Dashboard", "url": "/dashboard", "keywords": "home dashboard account overview progress"},
     {"title": "Exams", "url": "/exams", "keywords": "exams mock tests practice series test paper paper exam"},
+    {"title": "Apni test file kholo", "url": "/my-tests", "keywords": "apni html file test file open upload offline paper kholo local device"},
     {"title": "My attempts", "url": "/attempts", "keywords": "attempts results history resume unfinished score"},
     {"title": "Analytics", "url": "/analytics", "keywords": "analytics score progress report accuracy graph"},
     {"title": "Books", "url": "/books", "keywords": "books library read pdf ebook kitab pustak"},
@@ -316,8 +317,7 @@ def _load_exams(docs: List[Dict[str, Any]]) -> None:
             parts.append(f"{minutes} min")
         if row.total_marks:
             parts.append(f"{int(round(float(row.total_marks)))} marks")
-        if is_test:
-            parts.append(f"Series #{series_no}" if series_no else "Test")
+        # The series number already lives in the subtitle, so the badge stays short.
         docs.append(
             _doc(
                 "test" if is_test else "exam",
