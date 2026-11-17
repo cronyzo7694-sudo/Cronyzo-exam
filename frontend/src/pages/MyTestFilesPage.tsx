@@ -137,7 +137,7 @@ export function MyTestFilesPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-10">
+    <div className="mx-auto w-full max-w-3xl px-4 py-6 pb-28 sm:px-6 sm:py-10 sm:pb-12">
       <div className="flex items-start gap-3">
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
           <FileCode2 className="h-5 w-5" />
@@ -246,13 +246,13 @@ export function MyTestFilesPage() {
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[13.5px] font-bold">{record.name}</span>
                   <span className="block truncate text-[11px] font-semibold text-muted-foreground">
-                    {humanSize(record.size)} · {record.opened_at ? "kholi gayi" : "nayi"}
+                    {humanSize(record.size)}
                     {record.opened_at
-                      ? ` ${new Date(record.opened_at).toLocaleDateString("en-IN", {
+                      ? ` · ${new Date(record.opened_at).toLocaleDateString("en-IN", {
                           day: "numeric",
                           month: "short",
-                        })}`
-                      : ""}
+                        })} ko kholi thi`
+                      : " · nayi file"}
                   </span>
                 </span>
                 <button
