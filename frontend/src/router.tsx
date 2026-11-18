@@ -55,6 +55,7 @@ import { StorefrontPage } from "@/pages/StorefrontPage";
 import { SellerProfilePage } from "@/pages/SellerProfilePage";
 import { SellLandingPage } from "@/pages/SellLandingPage";
 import { MyTestFilesPage } from "@/pages/MyTestFilesPage";
+import { EditBookPage } from "@/pages/EditBookPage";
 import { SellerDashboardPage } from "@/pages/SellerDashboardPage";
 import {
   CreateBookPage,
@@ -444,6 +445,14 @@ const createBookRoute = createRoute({
   component: CreateBookPage,
 });
 
+/** Full book editor — every field the create form has, editable later. */
+const editBookRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/sell/books/$slug/edit",
+  beforeLoad: () => requireAuth(),
+  component: EditBookPage,
+});
+
 const sellerEarningsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/sell/earnings",
@@ -679,6 +688,7 @@ const routeTree = rootRoute.addChildren([
     sellerEarningsRoute,
     sellerCoursesRoute,
     sellerBooksRoute,
+    editBookRoute,
     sellerProductsRoute,
     createProductRoute,
     createCourseRoute,

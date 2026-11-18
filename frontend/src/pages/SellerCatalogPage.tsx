@@ -271,7 +271,14 @@ export function SellerCatalogPage({ kind }: { kind: Kind }) {
                     <ExternalLink className="h-4 w-4" />
                   </Link>
                 </Button>
-                {kind !== "courses" && (
+                {kind === "books" && (
+                  <Button asChild variant="ghost" size="icon" title="Edit book" aria-label={`Edit ${row.title}`}>
+                    <Link to="/sell/books/$slug/edit" params={{ slug: row.slug }} className="text-muted-foreground hover:text-primary">
+                      <Pencil className="h-4 w-4" />
+                    </Link>
+                  </Button>
+                )}
+                {kind === "products" && (
                   <Button
                     variant="ghost"
                     size="icon"

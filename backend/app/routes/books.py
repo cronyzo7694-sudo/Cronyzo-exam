@@ -382,6 +382,34 @@ def update_book(book_id):
         else:
             highlights = None
         book.highlights = highlights
+    # ── Digital edition, editable like everything else ───────────────────
+    # An empty string means "remove the file", not "leave it alone", so a seller
+    # can pull a wrong PDF without deleting the whole listing.
+    if any(key in data for key in ("file_url", "pdf_url")):
+        raw = data.get("file_url", data.get("pdf_url"))
+        url = _normalise_file_url(raw)
+        if url:
+            book.pdf_url = url
+            book.pdf_name = _clean(data.get("file_name"), 255) or book.pdf_name or "book.pdf"
+            if (book.format or "") not in ("ebook", "pdf"):
+                book.format = "pdf"
+        elif not str(raw or "").strip():
+            book.pdf_url = None
+            # pdf_size_bytes is NOT NULL in the schema (it was added later), so a
+            # removed file is stored as 0 rather than null.
+            book.pdf_size_bytes = 0
+            book.pdf_name = None
+    if any(key in data for key in ("preview_url", "preview_pdf_url")):
+        raw = data.get("preview_url", data.get("preview_pdf_url"))
+        url = _normalise_file_url(raw)
+        if url:
+            book.preview_pdf_url = url
+        elif not str(raw or "").strip():
+            book.preview_pdf_url = None
+    if "preview_pages" in data:
+        book.preview_pages = max(0, _safe_int(data.get("preview_pages"), book.preview_pages))
+    if "is_free_download" in data:
+        book.is_free_download = bool(data.get("is_free_download"))
     if "is_active" in data:
         book.is_active = bool(data.get("is_active"))
     if "is_featured" in data and user.role == "admin":
