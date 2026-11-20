@@ -20,6 +20,7 @@ import logging
 import os
 import re
 import secrets
+import time
 from typing import Any, Optional, Type, Union
 
 from dotenv import load_dotenv
@@ -466,6 +467,53 @@ def _register_jwt_loaders(app: Flask) -> None:
 
 
 def _register_health_routes(app: Flask) -> None:
+    @app.route("/api/health/deep")
+    def health_deep():
+        """Diagnostic probe: boot state, database reachability, catalogue counts.
+
+        Read-only, no secrets. Exists because a boot that dies on a database
+        hiccup used to look exactly like "my whole shop is gone" from outside.
+        """
+        import shutil
+
+        report = {
+            "status": "ok",
+            "service": _SERVICE_NAME,
+            "version": _SERVICE_VERSION,
+            "boot_error": app.config.get("BOOT_DB_ERROR"),
+            "database": "unknown",
+        }
+        try:
+            from app.extensions import db as _db
+
+            _db.session.execute(_db.text("SELECT 1"))
+            report["database"] = "ok"
+            for model_name, table in (
+                ("books", "books"),
+                ("exams", "exams"),
+                ("products", "products"),
+                ("courses", "courses"),
+                ("users", "users"),
+                ("orders", "orders"),
+            ):
+                try:
+                    rows = _db.session.execute(_db.text(f"SELECT COUNT(*) FROM {table}")).scalar()
+                    report[model_name] = int(rows or 0)
+                except Exception:
+                    report[model_name] = None
+        except Exception as exc:  # noqa: BLE001
+            report["database"] = "error"
+            report["database_error"] = str(exc)[:300]
+            report["status"] = "degraded"
+
+        try:
+            usage = shutil.disk_usage(app.root_path)
+            report["disk_free_mb"] = round(usage.free / (1024 * 1024))
+            report["disk_total_mb"] = round(usage.total / (1024 * 1024))
+        except Exception:  # noqa: BLE001
+            pass
+        return jsonify(report)
+
     @app.route("/api/health")
     def health():
         """
@@ -499,6 +547,19 @@ def _bootstrap_database(app: Flask) -> None:
     skip_seed = not _truthy_env("CRONYZO_SEED_DEMO", default=False)
     skip_create = _truthy_env("CRONYZO_SKIP_CREATE_ALL", default=False)
 
+    app.config.setdefault("BOOT_DB_ERROR", None)
+    try:
+        _bootstrap_database_inner(app, skip_seed=skip_seed, skip_create=skip_create)
+    except Exception as exc:  # noqa: BLE001
+        # A transient database hiccup (cold Neon, locked SQLite, full disk)
+        # must never turn every page into a 500 again. Log it, remember it, and
+        # keep serving: read-only pages still work, and /api/health/deep says
+        # exactly what happened.
+        logger.exception("database bootstrap failed — serving in degraded mode")
+        app.config["BOOT_DB_ERROR"] = f"{type(exc).__name__}: {str(exc)[:300]}"
+
+
+def _bootstrap_database_inner(app: Flask, *, skip_seed: bool, skip_create: bool) -> None:
     with app.app_context():
         # Import models so metadata is registered on db.Model.metadata
         from app import models  # noqa: F401
@@ -519,11 +580,21 @@ def _bootstrap_database(app: Flask) -> None:
         if schema_current:
             logger.info("schema already current — skipping create_all/upgrade (fast boot)")
         elif not skip_create:
-            try:
-                db.create_all()
-            except Exception:
+            last_error: Optional[Exception] = None
+            for attempt in range(1, 4):
+                try:
+                    db.create_all()
+                    last_error = None
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    last_error = exc
+                    logger.warning(
+                        "db.create_all() attempt %s/3 failed: %s", attempt, str(exc)[:160]
+                    )
+                    time.sleep(1.5 * attempt)
+            if last_error is not None:
                 logger.exception("db.create_all() failed during application bootstrap")
-                raise
+                raise last_error
             try:
                 from app.services.schema_upgrade import ensure_additive_schema
 

@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 import { useAuthStore } from "@/stores/authStore";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { DbNotice } from "@/components/system/DbNotice";
 import { PublicLayout } from "@/components/layout/PublicLayout";
 import { LoginPage } from "@/pages/LoginPage";
 import { RegisterPage } from "@/pages/RegisterPage";
@@ -168,7 +169,12 @@ const catalogSearch = (s: Record<string, unknown>): CatalogSearch => ({
    ═══════════════════════════════════════════════════════════ */
 
 const rootRoute = createRootRoute({
-  component: () => <Outlet />,
+  component: () => (
+    <>
+      <Outlet />
+      <DbNotice />
+    </>
+  ),
 });
 
 /* ── Auth (standalone, full-screen) ─────────────────────── */
