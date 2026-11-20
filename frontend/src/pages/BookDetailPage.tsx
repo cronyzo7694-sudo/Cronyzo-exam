@@ -431,7 +431,7 @@ export function BookDetailPage() {
                     <div className="flex items-center gap-2.5">
                       <FileText className="h-4 w-4 shrink-0 text-primary" />
                       <span className="text-muted-foreground">
-                        Instant download after checkout
+                        Checkout ke baad turant padhna shuru — Cronyzo par hi
                       </span>
                     </div>
                   ) : (
@@ -445,7 +445,10 @@ export function BookDetailPage() {
                   <div className="flex items-center gap-2.5">
                     <Package className="h-4 w-4 shrink-0 text-primary" />
                     <span className="text-muted-foreground">
-                      Free delivery on orders over ₹999
+                      {Number(book.shipping_fee || 0) > 0
+                        ? `Delivery ₹${Number(book.shipping_fee)} · checkout par`
+                        : "Free delivery"}{" "}
+                      · COD available
                     </span>
                   </div>
                 </div>

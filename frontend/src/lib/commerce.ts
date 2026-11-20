@@ -68,6 +68,8 @@ export type Course = {
   status: string;
   price: Money;
   mrp: Money;
+  /** Courier charge the seller set for a printed copy. */
+  shipping_fee?: Money;
   discount_percent: number;
   is_free: boolean;
   delivery_mode: string;
@@ -126,6 +128,8 @@ export type Book = {
   highlights: string[];
   price: Money;
   mrp: Money;
+  /** Courier charge the seller set for a printed copy. */
+  shipping_fee?: Money;
   discount_percent: number;
   format: "paperback" | "hardcover" | "ebook" | "pdf";
   stock: number;
