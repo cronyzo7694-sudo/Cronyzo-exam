@@ -410,6 +410,26 @@ def start_attempt():
         status = 403 if reason != "Authentication required" else 401
         return jsonify({"error": reason}), status
 
+    # Paid test series: the paper opens only for a buyer (or the creator/admin).
+    try:
+        from app.services.exam_access import access as _paid_access
+
+        paid_ok, price, buy_exam_id = _paid_access(exam, user)
+        if not paid_ok:
+            return (
+                jsonify(
+                    {
+                        "error": "Ye test series paid hai — pehle kharidein",
+                        "code": "payment_required",
+                        "price": price,
+                        "buy_exam_id": buy_exam_id,
+                    }
+                ),
+                402,
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("paid access check failed exam=%s", exam_id_i)
+
     if (exam.total_questions or 0) < 1:
         exam.recalculate_totals()
     if (exam.total_questions or 0) < 1:

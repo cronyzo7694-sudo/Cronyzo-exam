@@ -6,7 +6,7 @@ import {
   ChevronLeft, ChevronRight, Search, Sun, Moon, Bell,
   BookOpen, Home, Sparkles, Trophy, Target, Zap,
   Bot, HelpCircle, FileText, Scale, ShieldCheck, Info, MessageSquare, MessageCircle,
-  ShoppingBag, ShoppingCart, Store, Package, FileJson, Star,
+  ShoppingBag, ShoppingCart, Store, Package, FileJson, Star, Truck,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useMemo, createContext, useContext } from "react";
 import { useAuthStore } from "@/stores/authStore";
@@ -81,6 +81,7 @@ const navigation: NavGroup[] = [
       { to: "/sell/courses", label: "My Courses", icon: GraduationCap, creatorOnly: true },
       { to: "/sell/books", label: "My Books", icon: Library, creatorOnly: true },
       { to: "/sell/products", label: "My Products", icon: Package, creatorOnly: true },
+      { to: "/sell/orders", label: "Orders & Delivery", icon: Truck, creatorOnly: true },
     ],
   },
   {

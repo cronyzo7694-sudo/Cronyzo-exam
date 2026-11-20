@@ -32,7 +32,7 @@ from flask_jwt_extended import jwt_required
 from app.extensions import db
 from app.models.book import Book
 from app.models.course import Course, Enrollment
-from app.models.order import Order, OrderItem, generate_order_number
+from app.models.order import Order, OrderEvent, OrderItem, generate_order_number
 from app.models.platform import Payment
 from app.models.store import Address, CartItem, Product
 from app.models.user import User
@@ -121,6 +121,29 @@ def _resolve_item(item_type: str, item_id: int) -> Optional[_BasketLine]:
             1,
             book.seller_id,
             book,
+        )
+    if item_type == "exam":
+        from app.models.exam import Exam
+
+        exam = Exam.query.get(item_id)
+        if exam is None:
+            return None
+        # A series is what gets sold; a standalone paid test can be too.
+        price = float(getattr(exam, "price", 0) or 0.0)
+        if price <= 0:
+            parent = getattr(exam, "parent_exam", None)
+            price = float(getattr(parent, "price", 0) or 0.0) if parent else 0.0
+        if price <= 0:
+            return None  # free test — nothing to buy
+        return _BasketLine(
+            "exam",
+            exam.id,
+            exam.title,
+            getattr(exam, "image_url", None) or getattr(exam, "cover_url", None),
+            price,
+            1,
+            getattr(exam, "created_by_id", None),
+            exam,
         )
     if item_type == "course":
         course = Course.query.get(item_id)
@@ -313,6 +336,16 @@ def checkout():
         if isinstance(line.obj, Product)
     )
 
+    # Courier charge is per listing: the seller sets it on the product/book.
+    # If nobody set anything we fall back to the flat platform rule.
+    seller_shipping = 0.0
+    for line in lines:
+        obj = line.obj
+        if isinstance(obj, Product) and (obj.fulfillment or "physical") == "physical":
+            seller_shipping += float(getattr(obj, "shipping_fee", 0) or 0) * line.qty
+        elif isinstance(obj, Book) and not (getattr(obj, "is_digital", False)):
+            seller_shipping += float(getattr(obj, "shipping_fee", 0) or 0) * line.qty
+
     coupon_code = _clean(payload.get("coupon_code"), 40) or ""
     subtotal_only = compute_cart_totals(line_inputs, has_physical_items=has_physical)
     discount, coupon_desc = _apply_coupon(coupon_code, float(subtotal_only["subtotal"]))
@@ -321,6 +354,7 @@ def checkout():
         line_inputs,
         has_physical_items=has_physical,
         discount=discount,
+        shipping_fee=round(seller_shipping, 2) if seller_shipping > 0 else None,
     )
 
     if float(totals["total"]) <= 0:
@@ -412,6 +446,20 @@ def checkout():
             ).first()
             if existing is None:
                 db.session.add(Enrollment(user_id=user.id, course_id=obj.id))
+
+    db.session.add(
+        OrderEvent(
+            order_id=order.id,
+            status=order.status,
+            note=(
+                "Order placed — cash on delivery"
+                if payment_method == "cod"
+                else "Order placed — payment received"
+            ),
+            actor_id=user.id,
+            actor_role=user.role,
+        )
+    )
 
     _settle_payment(order, user.id, payment_method)
 
@@ -509,6 +557,16 @@ def cancel_order(order_id):
                 book.stock = int(book.stock or 0) + int(item.qty or 0)
                 book.sold_count = max(0, int(book.sold_count or 0) - int(item.qty or 0))
 
+    db.session.add(
+        OrderEvent(
+            order_id=order.id,
+            status="cancelled",
+            note="Order cancelled",
+            actor_id=user.id,
+            actor_role=user.role,
+        )
+    )
+
     try:
         db.session.commit()
     except Exception:
@@ -517,6 +575,160 @@ def cancel_order(order_id):
         return jsonify({"error": "Could not cancel order"}), 500
 
     return jsonify({"message": "Order cancelled", "item": order.to_dict()})
+
+
+# ---------------------------------------------------------------------------
+# Delivery: sellers fulfil, buyers follow
+# ---------------------------------------------------------------------------
+# The journey of a physical order. Each step is one tap in the seller panel and
+# one line on the buyer's timeline.
+ORDER_FLOW = (
+    "confirmed",
+    "packed",
+    "shipped",
+    "out_for_delivery",
+    "delivered",
+)
+_STEP_LABEL = {
+    "pending": "Order placed",
+    "confirmed": "Order confirm hua",
+    "packed": "Pack ho gaya",
+    "shipped": "Courier ko diya",
+    "out_for_delivery": "Delivery ke liye nikla",
+    "delivered": "Deliver ho gaya",
+    "cancelled": "Cancel hua",
+    "refunded": "Refund hua",
+}
+
+
+def _seller_can_touch(order: Order, user: User) -> bool:
+    if (user.role or "") == "admin":
+        return True
+    return any(int(i.seller_id or 0) == int(user.id) for i in order.items)
+
+
+@orders_bp.get("/seller")
+@jwt_required()
+def seller_orders():
+    """Every order that contains one of the caller's listings."""
+    user = get_current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required"}), 401
+
+    status = (request.args.get("status") or "").strip().lower()[:32]
+    q = (
+        Order.query.join(OrderItem, OrderItem.order_id == Order.id)
+        .filter(OrderItem.seller_id == user.id)
+        .distinct()
+    )
+    if status and status != "all":
+        q = q.filter(Order.status == status)
+
+    rows = q.order_by(Order.placed_at.desc()).limit(100).all()
+    return jsonify({"items": [o.to_dict() for o in rows], "total": len(rows)})
+
+
+@orders_bp.patch("/<int:order_id>/status")
+@jwt_required()
+def update_order_status(order_id: int):
+    """Seller / admin moves a delivery forward (or cancels it)."""
+    user = get_current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required"}), 401
+
+    order = Order.query.get_or_404(order_id)
+    if not _seller_can_touch(order, user):
+        return jsonify({"error": "Ye order aapka nahi hai"}), 403
+
+    body = _json_body()
+    status = (str(body.get("status") or "").strip().lower())[:32]
+    if status not in ORDER_FLOW and status not in ("cancelled", "refunded"):
+        return jsonify({"error": "Galat status", "allowed": list(ORDER_FLOW) + ["cancelled"]}), 400
+
+    if order.status == "cancelled":
+        return jsonify({"error": "Cancel ho chuka order badla nahi ja sakta"}), 409
+
+    if status != "cancelled":
+        current = ORDER_FLOW.index(order.status) if order.status in ORDER_FLOW else 0
+        target = ORDER_FLOW.index(status)
+        if target < current:
+            return jsonify(
+                {
+                    "error": "Order peeche nahi jata — sirf aage badhayein",
+                    "current": order.status,
+                }
+            ), 409
+
+    order.status = status
+    if status == "delivered":
+        order.payment_status = "paid"  # COD cash collected on delivery
+    note = _clean(body.get("note"), 255) or _STEP_LABEL.get(status, status)
+    db.session.add(
+        OrderEvent(
+            order_id=order.id,
+            status=status,
+            note=note,
+            actor_id=user.id,
+            actor_role=user.role,
+        )
+    )
+
+    try:
+        db.session.commit()
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+        logger.exception("update_order_status failed id=%s", order_id)
+        return jsonify({"error": "Status save nahi hua"}), 500
+
+    return jsonify(
+        {
+            "message": f"Order ab '{_STEP_LABEL.get(status, status)}' hai",
+            "item": order.to_dict(),
+            "next": (
+                ORDER_FLOW[ORDER_FLOW.index(status) + 1]
+                if status in ORDER_FLOW and ORDER_FLOW.index(status) + 1 < len(ORDER_FLOW)
+                else None
+            ),
+        }
+    )
+
+
+@orders_bp.patch("/<int:order_id>/shipping")
+@jwt_required()
+def update_tracking(order_id: int):
+    """Courier + tracking id — the buyer sees it on the order page instantly."""
+    user = get_current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required"}), 401
+
+    order = Order.query.get_or_404(order_id)
+    if not _seller_can_touch(order, user):
+        return jsonify({"error": "Ye order aapka nahi hai"}), 403
+
+    body = _json_body()
+    order.tracking_id = _clean(body.get("tracking_id"), 120)
+    order.courier = _clean(body.get("courier"), 120)
+
+    db.session.add(
+        OrderEvent(
+            order_id=order.id,
+            status=order.status,
+            note="Tracking update"
+            + (f": {order.courier}" if order.courier else "")
+            + (f" {order.tracking_id}" if order.tracking_id else ""),
+            actor_id=user.id,
+            actor_role=user.role,
+        )
+    )
+
+    try:
+        db.session.commit()
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+        logger.exception("update_tracking failed id=%s", order_id)
+        return jsonify({"error": "Tracking save nahi hui"}), 500
+
+    return jsonify({"message": "Tracking save ho gayi", "item": order.to_dict()})
 
 
 __all__ = ["orders_bp"]

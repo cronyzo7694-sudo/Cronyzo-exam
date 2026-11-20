@@ -210,6 +210,8 @@ class Product(db.Model):
     condition = db.Column(db.String(32), default="new", nullable=False)
     # "physical" | "digital"
     fulfillment = db.Column(db.String(32), default="physical", nullable=False)
+    # Courier charge the seller wants for this product (0 = seller absorbs it).
+    shipping_fee = db.Column(db.Float, default=0.0, nullable=False)
 
     image_url = db.Column(db.Text, nullable=True)
     gallery_json = db.Column(db.Text, nullable=True)
@@ -262,6 +264,7 @@ class Product(db.Model):
             "brand": self.brand,
             "sku": self.sku,
             "price": _money(self.price),
+            "shipping_fee": _money(getattr(self, "shipping_fee", 0) or 0),
             "mrp": _money(self.mrp),
             "discount_percent": self.discount_percent,
             "stock": int(self.stock or 0),

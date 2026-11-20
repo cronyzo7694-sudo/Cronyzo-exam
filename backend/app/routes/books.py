@@ -314,6 +314,7 @@ def create_book():
         mrp=mrp,
         format=fmt,
         stock=max(0, _safe_int(data.get("stock"), 0)),
+        shipping_fee=max(0.0, _safe_float(data.get("shipping_fee"), 0.0)),
         status="published",
         pdf_url=file_url,
         pdf_name=_clean(data.get("file_name"), 255)
@@ -367,6 +368,8 @@ def update_book(book_id):
             book.format = fmt
     if "price" in data:
         book.price = max(0.0, _safe_float(data.get("price"), book.price))
+    if "shipping_fee" in data:
+        book.shipping_fee = max(0.0, _safe_float(data.get("shipping_fee"), book.shipping_fee))
     if "mrp" in data:
         book.mrp = max(0.0, _safe_float(data.get("mrp"), book.mrp))
     if "pages" in data:

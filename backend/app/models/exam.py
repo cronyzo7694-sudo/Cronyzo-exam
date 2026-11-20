@@ -99,6 +99,9 @@ class Exam(db.Model):
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
+    # A series (parent) carries the price; its tests inherit it.
+    price = db.Column(db.Float, default=0.0, nullable=False)
+    mrp = db.Column(db.Float, default=0.0, nullable=False)
     parent_exam_id = db.Column(
         db.Integer,
         db.ForeignKey("exams.id", ondelete="CASCADE"),
@@ -202,6 +205,9 @@ class Exam(db.Model):
             "created_at": _iso(self.created_at),
             "updated_at": _iso(self.updated_at),
             "parent_exam_id": self.parent_exam_id,
+            # Selling a series: price lives on the parent, tests inherit it.
+            "price": float(getattr(self, "price", 0) or 0.0),
+            "mrp": float(getattr(self, "mrp", 0) or 0.0),
         }
         if include_sections:
             try:

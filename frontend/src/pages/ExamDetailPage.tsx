@@ -27,6 +27,7 @@ import {
   PlayCircle,
   RotateCcw,
   Search as SearchIcon,
+  ShoppingCart,
   Sparkles,
   Trophy,
   X,
@@ -126,6 +127,13 @@ export function ExamDetailPage() {
     [tests],
   );
 
+  /** Paid series: which exam to buy and for how much. */
+  const [paywall, setPaywall] = useState<{ examId: number; price: number } | null>(null);
+  const setNeedsPurchase = (examId: number, price: number) => setPaywall({ examId, price });
+
+  const buySeries = (examId: number) =>
+    navigate({ to: "/checkout", search: { type: "exam", id: String(examId) } });
+
   const startExam = async (target: Exam) => {
     setStarting(target.id);
     setError(null);
@@ -135,7 +143,12 @@ export function ExamDetailPage() {
       loadFromPayload(payload);
       navigate({ to: "/play/$attemptId", params: { attemptId: String(payload.attempt.id) } });
     } catch (err: any) {
-      setError(err?.message || "Test shuru nahi ho paya — dobara try karo.");
+      if (err?.status === 402) {
+        setNeedsPurchase(err?.data?.buy_exam_id ?? target.id, err?.data?.price ?? 0);
+        setError(err?.message || "Ye test series paid hai — pehle kharidein.");
+      } else {
+        setError(err?.message || "Test shuru nahi ho paya — dobara try karo.");
+      }
     } finally {
       setStarting(null);
     }
@@ -231,6 +244,40 @@ export function ExamDetailPage() {
         <p className="rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] font-semibold text-destructive">
           {error}
         </p>
+      )}
+
+      {/* ── Paid series: price, unlock state, and the buy button ───────── */}
+      {(exam.is_paid || paywall) && (
+        <section
+          className={cn(
+            "flex flex-wrap items-center justify-between gap-3 rounded-2xl border p-4",
+            exam.purchased
+              ? "border-emerald-500/30 bg-emerald-500/5"
+              : "border-amber-500/35 bg-amber-500/5",
+          )}
+        >
+          <div>
+            <p className="text-[13px] font-bold">
+              {exam.purchased ? "Aapke paas ye series hai" : "Paid test series"}
+            </p>
+            <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+              {exam.purchased
+                ? "Is series ke saare tests aapke liye khule hain."
+                : `Ek baar kharidein — series ke saare tests khul jayenge${
+                    exam.price ? ` · ₹${exam.price}` : ""
+                  }`}
+            </p>
+          </div>
+          {!exam.purchased && (
+            <button
+              onClick={() => buySeries(paywall?.examId ?? exam.buy_exam_id ?? exam.id)}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-[13px] font-bold text-primary-foreground"
+            >
+              <ShoppingCart className="h-4 w-4" />
+              {`Series kharidein${exam.price ? ` · ₹${exam.price}` : ""}`}
+            </button>
+          )}
+        </section>
       )}
 
       {/* ── A single test: instructions + start ────────────────────────── */}

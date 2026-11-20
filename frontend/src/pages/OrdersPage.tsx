@@ -198,6 +198,27 @@ export function OrdersPage() {
 
               {/* Footer */}
               <div className="flex flex-wrap items-center gap-3 border-t bg-muted/20 px-5 py-3.5">
+                {order.events && order.events.length > 0 && (
+                  <ol className="mt-3 space-y-1.5 border-l-2 border-dashed border-primary/30 pl-3">
+                    {order.events.map((event, index) => (
+                      <li key={event.id} className="relative text-[11px]">
+                        <span
+                          className={`absolute -left-[19px] top-1 h-2 w-2 rounded-full ${
+                            index === order.events!.length - 1 ? "bg-primary" : "bg-muted-foreground/40"
+                          }`}
+                        />
+                        <p className="font-bold capitalize text-foreground">
+                          {event.status.replace(/_/g, " ")}
+                        </p>
+                        <p className="text-muted-foreground">
+                          {event.note} ·{" "}
+                          {event.at ? new Date(event.at).toLocaleString("en-IN") : ""}
+                        </p>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+
                 {order.status === "shipped" && (
                   <span className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-600">
                     <Truck className="h-3.5 w-3.5" />

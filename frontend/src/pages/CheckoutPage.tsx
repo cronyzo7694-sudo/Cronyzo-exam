@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { accountApi, booksApi, coursesApi, ordersApi, type Address } from "@/lib/commerce";
-import { paymentsApi } from "@/lib/api";
+import { examsApi, paymentsApi } from "@/lib/api";
 import { useCartStore } from "@/stores/cartStore";
 import { Button } from "@/components/ui/button";
 import { Price } from "@/components/commerce/Primitives";
@@ -96,7 +96,24 @@ export function CheckoutPage() {
     enabled: directType === "book" && directId > 0,
   });
 
+  const { data: directExam } = useQuery({
+    queryKey: ["checkout", "exam", directId],
+    queryFn: () => examsApi.get(directId),
+    enabled: directType === "exam" && directId > 0,
+  });
+
   const directItem = useMemo(() => {
+    if (directType === "exam" && directId > 0 && directExam) {
+      const e: any = directExam;
+      return {
+        item_type: "exam",
+        item_id: Number(e.id),
+        title: e.title,
+        image_url: null,
+        unit_price: Number(e.price ?? 0),
+        qty: 1,
+      };
+    }
     if (directType === "course" && directId > 0) {
       const found = directCourse?.items?.find((c) => c.id === directId);
       return found
@@ -140,7 +157,9 @@ export function CheckoutPage() {
       }));
 
   const subtotal = lineItems.reduce((sum, i) => sum + i.unit_price * i.qty, 0);
-  const hasPhysical = lineItems.some((i) => i.item_type === "product");
+  const hasPhysical = lineItems.some(
+    (i) => i.item_type === "product" || i.item_type === "book",
+  );
   const shippingFee = !hasPhysical ? 0 : subtotal >= 999 ? 0 : 49;
   const discount = appliedCoupon ? Math.round(subtotal * 0.1 * 100) / 100 : 0;
   const total = Math.max(0, subtotal - discount + shippingFee);

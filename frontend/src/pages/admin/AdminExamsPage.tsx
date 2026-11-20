@@ -83,7 +83,7 @@ function SlideOver({ title, open, onClose, children }: { title: string; open: bo
    MAIN PAGE
    ══════════════════════════════════════════════════════════ */
 
-const emptyForm = { title: "", description: "", instructions: "", exam_mode: "mock", duration_minutes: "30", default_marks: "2", default_negative_marks: "0.5", strict_sections: false, section_title: "General" };
+const emptyForm = { title: "", description: "", instructions: "", exam_mode: "mock", duration_minutes: "30", default_marks: "2", default_negative_marks: "0.5", strict_sections: false, section_title: "General", price: "", mrp: "" };
 
 export function AdminExamsPage() {
   const qc = useQueryClient();
@@ -137,6 +137,8 @@ export function AdminExamsPage() {
         exam_mode: form.exam_mode, duration_seconds: Math.max(1, Number(form.duration_minutes) || 30) * 60,
         default_marks: Number(form.default_marks) || 2, default_negative_marks: Number(form.default_negative_marks) || 0.5,
         strict_sections: form.strict_sections, status: "published",
+        price: Math.max(0, Number((form as any).price) || 0),
+        mrp: Math.max(0, Number((form as any).mrp) || 0),
         sections: sections.map((s, i) => ({ title: s, order_index: i })),
       };
       if (editing) return examsApi.update(editing.id, payload);
@@ -158,7 +160,7 @@ export function AdminExamsPage() {
   const bulkDelete = () => { if (!window.confirm(`Delete ${selectedIds.size} exams?`)) return; selectedIds.forEach(id => delMut.mutate(id)); setSelectedIds(new Set()); };
 
   const openCreate = () => { setEditing(null); setForm(emptyForm); setSections(["General"]); setError(""); setDrawerOpen(true); };
-  const openEdit = (e: Exam) => { setEditing(e); setForm({ title: e.title, description: e.description || "", instructions: e.instructions || "", exam_mode: e.exam_mode, duration_minutes: String(Math.floor((e.duration_seconds || 3600) / 60)), default_marks: String(e.default_marks || 2), default_negative_marks: String(e.default_negative_marks || 0.5), strict_sections: e.strict_sections, section_title: "" }); setSections((e.sections || []).map(s => s.title) || ["General"]); setError(""); setDrawerOpen(true); };
+  const openEdit = (e: Exam) => { setEditing(e); setForm({ title: e.title, description: e.description || "", instructions: e.instructions || "", exam_mode: e.exam_mode, duration_minutes: String(Math.floor((e.duration_seconds || 3600) / 60)), default_marks: String(e.default_marks || 2), default_negative_marks: String(e.default_negative_marks || 0.5), strict_sections: e.strict_sections, section_title: "", price: String((e as any).price || 0), mrp: String((e as any).mrp || 0) }); setSections((e.sections || []).map(s => s.title) || ["General"]); setError(""); setDrawerOpen(true); };
 
   useEffect(() => { const h = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); searchRef.current?.focus(); } if ((e.metaKey || e.ctrlKey) && e.key === "n") { e.preventDefault(); openCreate(); } }; document.addEventListener("keydown", h); return () => document.removeEventListener("keydown", h); }, []);
 
@@ -345,6 +347,8 @@ export function AdminExamsPage() {
             <div className="space-y-1.5"><Label className="text-xs font-semibold">Default Mode</Label><select value={form.exam_mode} onChange={e=>setForm(p=>({...p,exam_mode:e.target.value}))} className="w-full rounded-xl border bg-card h-9 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/10 cursor-pointer"><option value="mock">Mock (auto)</option><option value="practice">Practice</option><option value="sectional">Sectional</option><option value="pyq">PYQ</option><option value="live">Live</option></select></div>
             <div className="space-y-1.5"><Label className="text-xs font-semibold">Marks / Q</Label><Input value={form.default_marks} onChange={e=>setForm(p=>({...p,default_marks:e.target.value}))} type="number" step="0.5" min="0" className="rounded-xl h-9 text-sm text-center" /></div>
             <div className="space-y-1.5"><Label className="text-xs font-semibold">Negative</Label><Input value={form.default_negative_marks} onChange={e=>setForm(p=>({...p,default_negative_marks:e.target.value}))} type="number" step="0.25" min="0" className="rounded-xl h-9 text-sm text-center" /></div>
+            <div className="space-y-1.5"><Label className="text-xs font-semibold">Price ₹</Label><Input value={(form as any).price ?? ""} onChange={e=>setForm(p=>({ ...p, price: e.target.value } as any))} type="number" min="0" placeholder="0 = free" className="rounded-xl h-9 text-sm text-center" /></div>
+            <div className="space-y-1.5"><Label className="text-xs font-semibold">MRP ₹</Label><Input value={(form as any).mrp ?? ""} onChange={e=>setForm(p=>({ ...p, mrp: e.target.value } as any))} type="number" min="0" placeholder="cut price" className="rounded-xl h-9 text-sm text-center" /></div>
           </div>
           <div className="rounded-lg border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
             Tests file bank se apne aap banenge (topic / chapter / subject / full).

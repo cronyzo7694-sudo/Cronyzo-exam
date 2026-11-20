@@ -13,7 +13,7 @@ from app.extensions import db
 from app.models.exam import EXAM_MODES, EXAM_STATUSES, Exam, ExamQuestion, ExamSection
 from app.models.question import Question
 from app.services.rule_engine import ExamRuleEngine, apply_column_sync_to_rules, merge_exam_rules
-from app.utils.decorators import roles_required
+from app.utils.decorators import get_current_user, roles_required
 from app.utils.validators import parse_pagination, require_fields
 
 exams_bp = Blueprint("exams", __name__)
@@ -324,6 +324,23 @@ def get_exam(exam_id):
         data["resolved_rules"] = ExamRuleEngine.from_exam(exam).to_public_dict()
     except Exception:
         data["resolved_rules"] = {}
+    # Paid series: tell the client the price and whether this reader owns it.
+    try:
+        from app.services.exam_access import access as _exam_access, series_price
+
+        user = get_current_user()
+        allowed, price, buy_id = _exam_access(exam, user)
+        data["price"] = round(series_price(exam), 2)
+        data["is_paid"] = price > 0
+        data["purchased"] = bool(allowed)
+        data["buy_exam_id"] = buy_id
+        if isinstance(data.get("children"), list):
+            for child in data["children"]:
+                child["price"] = data["price"]
+                child["is_paid"] = data["is_paid"]
+                child["purchased"] = bool(allowed)
+    except Exception:  # noqa: BLE001
+        logger.exception("exam access flags failed id=%s", exam_id)
     # Additive: AUTO coming-soon flag — an exam is "coming soon" only when it
     # has no questions/tests yet; if it has questions it is active/playable.
     try:
@@ -385,6 +402,8 @@ def create_exam():
         exam_mode=exam_mode,
         status=status,
         parent_exam_id=parent_exam_id,
+        price=max(0.0, _safe_float(data.get("price", 0), 0.0)),
+        mrp=max(0.0, _safe_float(data.get("mrp", 0), 0.0)),
         duration_seconds=duration,
         strict_sections=bool(data.get("strict_sections", False)),
         default_marks=_safe_float(data.get("default_marks", 1.0), 1.0),
@@ -495,6 +514,11 @@ def update_exam(exam_id):
         duration = _safe_int(data["duration_seconds"])
         if duration is not None:
             exam.duration_seconds = max(_MIN_DURATION, min(duration, _MAX_DURATION))
+    # Selling the series: 0 = free for everyone.
+    if "price" in data:
+        exam.price = max(0.0, _safe_float(data.get("price"), exam.price))
+    if "mrp" in data:
+        exam.mrp = max(0.0, _safe_float(data.get("mrp"), exam.mrp))
     if "parent_exam_id" in data:
         parent_exam_id = data.get("parent_exam_id")
         if parent_exam_id in (None, ""):

@@ -382,6 +382,7 @@ def create_product():
         brand=_clean(data.get("brand"), _MAX_BRAND),
         sku=_clean(data.get("sku"), _MAX_SKU),
         price=price,
+        shipping_fee=max(0.0, _safe_float(data.get("shipping_fee"), 0.0)),
         mrp=mrp,
         stock=max(0, _safe_int(data.get("stock"), 0)),
         condition=condition,
@@ -429,6 +430,8 @@ def update_product(product_id):
             setattr(product, field, _clean(data.get(field), limit))
     if "price" in data:
         product.price = max(0.0, _safe_float(data.get("price"), product.price))
+    if "shipping_fee" in data:
+        product.shipping_fee = max(0.0, _safe_float(data.get("shipping_fee"), product.shipping_fee))
     if "mrp" in data:
         product.mrp = max(0.0, _safe_float(data.get("mrp"), product.mrp))
     if "stock" in data:

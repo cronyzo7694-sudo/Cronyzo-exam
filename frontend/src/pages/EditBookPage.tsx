@@ -104,6 +104,7 @@ type Form = {
   price: string;
   mrp: string;
   stock: string;
+  shipping_fee: string;
   cover_url: string;
   description: string;
   highlights: string;
@@ -130,6 +131,7 @@ const EMPTY: Form = {
   price: "",
   mrp: "",
   stock: "",
+  shipping_fee: "",
   cover_url: "",
   description: "",
   highlights: "",
@@ -190,6 +192,7 @@ export function EditBookPage() {
       price: String(Number(book.price ?? 0)),
       mrp: String(Number(book.mrp ?? book.price ?? 0)),
       stock: book.stock !== undefined ? String(book.stock) : "",
+      shipping_fee: String(Number(book.shipping_fee || 0)),
       cover_url: book.cover_url ?? "",
       description: book.description ?? "",
       highlights: Array.isArray(book.highlights) ? book.highlights.join("\n") : (book.highlights ?? ""),
@@ -268,6 +271,7 @@ export function EditBookPage() {
         price: Number(form.price || 0),
         mrp: Number(form.mrp || form.price || 0),
         stock: Number(form.stock || 0),
+        shipping_fee: Number(form.shipping_fee || 0),
         cover_url: form.cover_url.trim(),
         description: form.description,
         highlights: form.highlights,
@@ -487,6 +491,18 @@ export function EditBookPage() {
                   onChange={(e) => set("stock", e.target.value)}
                   className={inputCls}
                 />
+              </Field>
+              <Field label="Delivery charge (₹)">
+                <input
+                  type="number"
+                  min={0}
+                  value={form.shipping_fee}
+                  onChange={(e) => set("shipping_fee", e.target.value)}
+                  className={inputCls}
+                />
+                <p className="mt-1 text-[10.5px] text-muted-foreground">
+                  Printed copy bhejne ka courier charge — 0 matlab free delivery. PDF/e-book par lagu nahi hota.
+                </p>
               </Field>
             </div>
           </div>

@@ -68,6 +68,7 @@ import { MyCoursesPage } from "@/pages/MyCoursesPage";
 import { OrdersPage } from "@/pages/OrdersPage";
 import { EarningsPage } from "@/pages/EarningsPage";
 import { SellerCatalogPage } from "@/pages/SellerCatalogPage";
+import { SellerOrdersPage } from "@/pages/SellerOrdersPage";
 
 /* ═══════════════════════════════════════════════════════════
    Guards
@@ -474,6 +475,13 @@ const sellerBooksRoute = createRoute({
   component: () => <SellerCatalogPage kind="books" />,
 });
 
+const sellerOrdersRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/sell/orders",
+  beforeLoad: () => requireCreator(),
+  component: SellerOrdersPage,
+});
+
 const sellerProductsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/sell/products",
@@ -689,6 +697,7 @@ const routeTree = rootRoute.addChildren([
     sellerCoursesRoute,
     sellerBooksRoute,
     editBookRoute,
+    sellerOrdersRoute,
     sellerProductsRoute,
     createProductRoute,
     createCourseRoute,

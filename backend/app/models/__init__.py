@@ -63,7 +63,7 @@ from app.models.course import (
     CourseReview,
 )
 from app.models.book import Book, BookChapter
-from app.models.order import Order, OrderItem
+from app.models.order import Order, OrderEvent, OrderItem
 
 # --- Operator-editable site content (hero, pillars, testimonials, settings) ---
 from app.models.site import SiteSetting, HeroSlide, PillarCard, Testimonial
@@ -125,6 +125,7 @@ __all__ = [
     "Book",
     "BookChapter",
     "Order",
+    "OrderEvent",
     "OrderItem",
     "UploadedImage",
     "StoredFile",

@@ -6,11 +6,11 @@
  *   • /api/ is never cached — marks, orders and results must never be stale;
  *   • navigations are network-first, so a fresh deploy is picked up immediately
  *     and the cache is only a fallback;
- *   • 20261120044607 is replaced with the build stamp by scripts/publish_site.sh,
+ *   • 20261120053121 is replaced with the build stamp by scripts/publish_site.sh,
  *     so every deploy drops the previous cache.
  */
 
-const VERSION = "cz-20261120044607";
+const VERSION = "cz-20261120053121";
 const SHELL_CACHE = `${VERSION}-shell`;
 const ASSET_CACHE = `${VERSION}-assets`;
 const SHELL_URLS = ["/", "/manifest.webmanifest", "/favicon.svg", "/icons/icon-192.png", "/icons/icon-512.png"];

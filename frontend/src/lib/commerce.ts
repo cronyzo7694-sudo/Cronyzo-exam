@@ -265,6 +265,14 @@ export type OrderItem = {
   seller_id?: number | null;
 };
 
+export type OrderEvent = {
+  id: number;
+  status: string;
+  note?: string | null;
+  actor_role?: string | null;
+  at: string;
+};
+
 export type Order = {
   id: number;
   order_number: string;
@@ -279,8 +287,12 @@ export type Order = {
   currency: string;
   notes?: string | null;
   tracking_id?: string | null;
+  courier?: string | null;
+  address?: Record<string, string> | null;
   placed_at?: string | null;
   items: OrderItem[];
+  /** Delivery timeline — oldest first. */
+  events?: OrderEvent[];
 };
 
 export type Address = {
@@ -625,6 +637,16 @@ export const ordersApi = {
   mine: (status?: string) => api.get<{ items: Order[]; total: number }>(`/orders/my${qs({ status })}`),
   get: (orderNumber: string) => api.get<Order>(`/orders/${orderNumber}`),
   cancel: (orderId: number) => api.post<{ message: string; item: Order }>(`/orders/${orderId}/cancel`),
+  /* ── Delivery: the seller's side ─────────────────────────────────── */
+  forSeller: (status?: string) =>
+    api.get<{ items: Order[]; total: number }>(`/orders/seller${qs({ status })}`),
+  setStatus: (orderId: number, status: string, note?: string) =>
+    api.patch<{ message: string; item: Order; next?: string | null }>(
+      `/orders/${orderId}/status`,
+      { status, note },
+    ),
+  setTracking: (orderId: number, data: { tracking_id?: string; courier?: string }) =>
+    api.patch<{ message: string; item: Order }>(`/orders/${orderId}/shipping`, data),
 };
 
 export const accountApi = {

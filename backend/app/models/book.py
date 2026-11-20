@@ -63,6 +63,8 @@ class Book(db.Model):
     highlights = db.Column(db.Text, nullable=True)  # newline separated bullets
 
     price = db.Column(db.Float, default=0.0, nullable=False)
+    # What the courier costs for a printed copy of this book (0 = free delivery).
+    shipping_fee = db.Column(db.Float, default=0.0, nullable=False)
     mrp = db.Column(db.Float, default=0.0, nullable=False)
     # "paperback" | "hardcover" | "ebook" | "pdf"
     format = db.Column(db.String(32), default="paperback", nullable=False)
@@ -134,6 +136,7 @@ class Book(db.Model):
             "description": self.description,
             "highlights": self.highlight_list(),
             "price": _money(self.price),
+            "shipping_fee": _money(getattr(self, "shipping_fee", 0) or 0),
             "mrp": _money(self.mrp),
             "discount_percent": self.discount_percent,
             "format": self.format,

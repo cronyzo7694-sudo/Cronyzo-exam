@@ -508,6 +508,12 @@ export type Exam = {
   question_total?: number;
   subjects?: string[];
   progress?: { in_progress: number; completed: number; total: number } | null;
+  /** Paid series: price lives on the series, tests inherit it. */
+  price?: number;
+  mrp?: number;
+  is_paid?: boolean;
+  purchased?: boolean;
+  buy_exam_id?: number | null;
   /** Per-user attempt state added by GET /exams — powers Start vs Resume. */
   attempt?: {
     id: number;

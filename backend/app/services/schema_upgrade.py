@@ -75,12 +75,27 @@ _OPTION_COLUMNS: Sequence[Tuple[str, str]] = (
 
 _EXAM_COLUMNS: Sequence[Tuple[str, str]] = (
     ("parent_exam_id", "INTEGER"),
+    # A test series is sold, not given: 0 = free, >0 = price of the series.
+    ("price", "FLOAT DEFAULT 0"),
+    ("mrp", "FLOAT DEFAULT 0"),
 )
 
 # --- Cronyzo commerce / teaching additions --------------------------------
+# Delivery: what the courier costs for this listing (seller-set).
+_PRODUCT_COLUMNS: Sequence[Tuple[str, str]] = (
+    ("shipping_fee", "FLOAT DEFAULT 0"),
+)
+
+# Delivery: courier name on the order (tracking_id already existed).
+_ORDER_COLUMNS: Sequence[Tuple[str, str]] = (
+    ("courier", "VARCHAR(120)"),
+)
+
 # Digital editions for books: a seller uploads a PDF, optionally offers a free
 # sample, and can mark the whole title free to download.
 _BOOK_COLUMNS: Sequence[Tuple[str, str]] = (
+    # Delivery: the seller decides what courier costs for this listing.
+    ("shipping_fee", "FLOAT DEFAULT 0"),
     ("pdf_url", "VARCHAR(2048)"),
     ("pdf_name", "VARCHAR(255)"),
     ("pdf_size_bytes", "INTEGER DEFAULT 0"),
@@ -124,7 +139,7 @@ _REPLY_COLUMNS: Sequence[Tuple[str, str]] = (
 #  the code's tag, the pass is skipped entirely (2 tiny queries instead of 100).
 #  Bump _SCHEMA_TAG whenever a model gains a column/table.
 # ══════════════════════════════════════════════════════════════════════════
-_SCHEMA_TAG = "2026-11-09.demo-cleanup"
+_SCHEMA_TAG = "2026-11-20.paid-tests-delivery.2"
 
 # Column metadata is fetched once per table per process, not per column.
 _COLUMN_CACHE: dict = {}
@@ -248,6 +263,8 @@ def ensure_additive_schema() -> None:
     _add_columns("exams", _EXAM_COLUMNS)
     _add_columns("question_options", _OPTION_COLUMNS)
     _add_columns("books", _BOOK_COLUMNS)
+    _add_columns("orders", _ORDER_COLUMNS)
+    _add_columns("products", _PRODUCT_COLUMNS)
     _add_columns("lessons", _LESSON_COLUMNS)
     _add_columns("courses", _COURSE_COLUMNS)
     _add_columns("contact_tickets", _TICKET_COLUMNS)

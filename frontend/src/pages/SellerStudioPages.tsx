@@ -112,6 +112,7 @@ function CreateProductPageInner() {
     price: "",
     mrp: "",
     stock: "",
+    shipping_fee: "",
     image_url: "",
     fulfillment: "physical",
   });
@@ -126,6 +127,7 @@ function CreateProductPageInner() {
         price: Number(form.price || 0),
         mrp: Number(form.mrp || form.price || 0),
         stock: Number(form.stock || 0),
+        shipping_fee: Number((form as any).shipping_fee || 0),
         image_url: form.image_url,
         fulfillment: form.fulfillment,
       }),
@@ -217,6 +219,17 @@ function CreateProductPageInner() {
               value={form.stock}
               onChange={(e) => setForm({ ...form, stock: e.target.value })}
               placeholder="24"
+              className={inputCls}
+            />
+          </Field>
+
+          <Field label="Delivery charge (₹)">
+            <input
+              type="number"
+              min={0}
+              value={(form as any).shipping_fee ?? ""}
+              onChange={(e) => setForm({ ...form, shipping_fee: e.target.value } as any)}
+              placeholder="40"
               className={inputCls}
             />
           </Field>
@@ -682,6 +695,16 @@ function CreateBookPageInner() {
               value={form.stock}
               onChange={(e) => setForm({ ...form, stock: e.target.value })}
               placeholder="18"
+              className={inputCls}
+            />
+          </Field>
+          <Field label="Delivery charge (₹)">
+            <input
+              type="number"
+              min={0}
+              value={(form as any).shipping_fee ?? ""}
+              onChange={(e) => setForm({ ...form, shipping_fee: e.target.value } as any)}
+              placeholder="0 = free delivery"
               className={inputCls}
             />
           </Field>
