@@ -258,17 +258,23 @@ export function ExamDetailPage() {
         >
           <div>
             <p className="text-[13px] font-bold">
-              {exam.purchased ? "Aapke paas ye series hai" : "Paid test series"}
+              {(exam as any).unlimited_access
+                ? "Admin access — sab kuch free"
+                : exam.purchased
+                  ? "Aapke paas ye series hai"
+                  : "Paid test series"}
             </p>
             <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-              {exam.purchased
+              {(exam as any).unlimited_access
+                ? "Aapke account par har book aur test free hai — kabhi payment nahi."
+                : exam.purchased
                 ? "Is series ke saare tests aapke liye khule hain."
                 : `Ek baar kharidein — series ke saare tests khul jayenge${
                     exam.price ? ` · ₹${exam.price}` : ""
                   }`}
             </p>
           </div>
-          {!exam.purchased && (
+          {!exam.purchased && !(exam as any).unlimited_access && (
             <button
               onClick={() => buySeries(paywall?.examId ?? exam.buy_exam_id ?? exam.id)}
               className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-[13px] font-bold text-primary-foreground"

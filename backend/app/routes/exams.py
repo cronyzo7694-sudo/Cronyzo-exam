@@ -334,6 +334,14 @@ def get_exam(exam_id):
         data["is_paid"] = price > 0
         data["purchased"] = bool(allowed)
         data["buy_exam_id"] = buy_id
+        # Admin/creator never pays — the UI says so instead of showing a price.
+        data["unlimited_access"] = bool(
+            user is not None
+            and (
+                (user.role or "") == "admin"
+                or int(getattr(exam, "created_by", 0) or 0) == int(user.id)
+            )
+        )
         if isinstance(data.get("children"), list):
             for child in data["children"]:
                 child["price"] = data["price"]

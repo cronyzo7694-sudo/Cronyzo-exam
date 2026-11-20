@@ -331,6 +331,15 @@ def create_book():
         logger.exception("create_book failed")
         return jsonify({"error": "Could not create book"}), 500
 
+    # PDF (upload ya link) diya hai aur sample nahi — sample khud ban jayega.
+    if book.pdf_url and not book.preview_pdf_url:
+        try:
+            from app.services import book_reader
+
+            book_reader.spawn_auto_sample(book.id)
+        except Exception:  # noqa: BLE001
+            logger.exception("could not queue sample for book=%s", book.id)
+
     return jsonify({"message": "Book listed", "item": book.to_dict()}), 201
 
 
@@ -433,18 +442,24 @@ def update_book(book_id):
         logger.exception("update_book id=%s failed", book_id)
         return jsonify({"error": "Could not update book"}), 500
 
-    # A book with a PDF but no sample now grows one on its own (first N pages),
-    # unless the seller is deliberately managing the sample by hand.
+    # A book with a PDF but no sample grows one on its own (first N pages),
+    # unless the seller is deliberately managing the sample by hand. A pasted
+    # link is imported in the background, so saving stays instant.
     note = None
     if book.pdf_url and not book.preview_pdf_url and not sample_touched:
         try:
             from app.services import book_reader
+            from app.services.documents import file_id_from_url
 
-            pages, error = book_reader.auto_sample(book)
-            if pages:
-                note = f"Sample ke {pages} pages auto ban gaye."
-            elif error:
-                note = f"Sample auto nahi bana: {error}"
+            if file_id_from_url(book.pdf_url):
+                pages, error = book_reader.auto_sample(book)
+                if pages:
+                    note = f"Sample ke {pages} pages auto ban gaye."
+                elif error:
+                    note = f"Sample auto nahi bana: {error}"
+            else:
+                book_reader.spawn_auto_sample(book.id)
+                note = "Sample kuchh seconds me apne aap ban jayega."
         except Exception:  # noqa: BLE001
             logger.exception("auto sample on update failed book=%s", book_id)
 
@@ -939,6 +954,20 @@ def book_reader_info(book_id: int):
         "reading_only": True,
         "note": "Ye e-book sirf Cronyzo par padhi ja sakti hai — download ya share nahi hoti.",
     }
+
+    is_admin = user is not None and (user.role or "") == "admin"
+    payload["admin_access"] = is_admin
+    payload["unlimited_access"] = bool(is_admin or is_owner)
+
+    # No sample yet? Grow one quietly so the next visitor (a buyer) sees a
+    # free extract — this is what sells the book.
+    if not book.preview_pdf_url and book.pdf_url:
+        try:
+            from app.services import book_reader
+
+            book_reader.spawn_auto_sample(book.id)
+        except Exception:  # noqa: BLE001
+            logger.exception("sample queue on read failed book=%s", book.id)
 
     if book.pdf_url and allowed and user is not None:
         stored_id, error = book_reader.ensure_stored(book)

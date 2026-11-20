@@ -1,22 +1,36 @@
 /**
  * ProtectedBookReader — the only way an e-book is read on Cronyzo.
  *
- * The PDF stays on the server: the API renders one page at a time into a
- * JPEG that already carries the reader's own identity (email · phone ·
- * "Cronyzo"). That means
+ * Feels like a real e-book app (cream paper, one-tap page turn, chrome that
+ * slides away) while staying impossible to walk off with:
  *
- *   • nothing to download — there is no file, only pictures of a page,
- *   • nothing to copy — no text layer, no selection, no right-click menu,
- *   • nothing to hot-link — pages need a signed-in session per request,
- *   • a screenshot is still possible (no browser can block it) but it comes
- *     out watermarked with the account that took it.
+ *   • the server renders one watermarked JPEG per page — no file ever reaches
+ *     the browser, so there is nothing to download, copy, hot-link or re-share,
+ *   • every page carries the reader's identity (email · phone · Cronyzo) plus a
+ *     printed footer, so a screenshot points back at the account that took it,
+ *   • copy / save / print shortcuts are blocked, printing is blocked outright,
+ *     and the page blurs the moment the tab loses focus.
  *
- * On top of the watermark the reader also blanks itself when the tab loses
- * focus (so screen-recorders/side-by-side photo apps get a blurred page),
- * refuses printing/saving shortcuts, and never renders in a print stylesheet.
+ * Controls hide themselves after a moment, so the page gets the whole screen;
+ * a small floating button (or a tap in the middle) brings them back. While the
+ * reader is open the site's bottom navigation and chat bubble are hidden too.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Loader2, Lock, Minus, Plus, X } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Eye,
+  EyeOff,
+  Maximize2,
+  Minimize2,
+  Lock,
+  Loader2,
+  Moon,
+  Sun,
+  X,
+} from "lucide-react";
 import { booksApi, type BookReaderInfo } from "../../lib/commerce";
 
 type Props = {
@@ -26,11 +40,14 @@ type Props = {
   onClose: () => void;
   /** called when the reader needs money/login — the page decides what to show */
   onNeedsPurchase?: () => void;
-  /** used to jump back to where the reader stopped */
   title?: string;
 };
 
 const PAGE_KEY = (id: number) => `cz_reader_page_${id}`;
+const THEME_KEY = "cz_reader_theme";
+const MAX_CACHED = 14;
+
+type Theme = "cream" | "night";
 
 export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPurchase, title }: Props) {
   const [info, setInfo] = useState<BookReaderInfo | null>(null);
@@ -41,8 +58,17 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
   const [hidden, setHidden] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
   const [loadingPage, setLoadingPage] = useState(false);
-  const cache = useRef<Map<number, string>>(new Map());
+  /** chrome (bars + buttons) — auto-hides so the page owns the screen */
+  const [chrome, setChrome] = useState(true);
+  const [theme, setTheme] = useState<Theme>(
+    () => (localStorage.getItem(THEME_KEY) as Theme) || "cream",
+  );
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [tick, setTick] = useState(0);
+  const cache = useRef<Map<number, string>>(new Map());
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const hideTimer = useRef<number | null>(null);
+  const touchX = useRef<number | null>(null);
 
   /* ── 1. what may this caller read? ─────────────────────────────────── */
   useEffect(() => {
@@ -57,24 +83,19 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
           setMessage(res.message || "Ye book nahi khul payi");
           return;
         }
-        if (sample && data.has_sample && data.mode !== "sample") {
-          // force the sample view even when the book is unlocked
-          setInfo({ ...data, mode: "sample", pages: data.pages });
-        } else {
-          setInfo(data);
-        }
-        const usable = data.mode === "full" || data.mode === "sample" || (sample && data.has_sample);
+        setInfo(sample ? { ...data, mode: data.has_sample ? "sample" : data.mode } : data);
+        const usable = data.mode === "full" || data.has_sample || (sample && data.has_sample);
         setStatus(usable ? "ready" : "blocked");
-        if (!usable) {
+        if (usable) {
+          const saved = Number(localStorage.getItem(PAGE_KEY(bookId)) || 0);
+          const last = saved > 0 && saved <= (data.pages || 0) ? saved : 1;
+          setPage(sample ? 1 : last);
+        } else {
           setMessage(
             data.code === "login_required"
               ? "Padhne ke liye sign in karein."
               : "Poori e-book kharidne ke baad hi padhi ja sakti hai.",
           );
-        } else {
-          const saved = Number(localStorage.getItem(PAGE_KEY(bookId)) || 0);
-          const last = saved > 0 && saved <= (data.pages || 0) ? saved : 1;
-          setPage(data.mode === "sample" || sample ? 1 : last);
         }
       } catch (err: any) {
         if (!alive) return;
@@ -87,10 +108,11 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
     };
   }, [bookId, sample]);
 
-  const sampleMode = (info?.mode === "sample") || sample;
+  const sampleMode = info?.mode === "sample";
   const total = Math.max(1, Number(info?.pages || 1));
+  const paper = theme === "cream" ? "bg-[#f6efe1] text-[#2e2a24]" : "bg-[#14161a] text-slate-200";
 
-  /* ── 2. one page at a time, prefetch the neighbours ────────────────── */
+  /* ── 2. one page at a time, neighbours prefetched (smooth turning) ── */
   const loadPage = useCallback(
     async (n: number) => {
       if (cache.current.has(n)) return;
@@ -98,22 +120,35 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
       try {
         const blob = await booksApi.pageImage(bookId, n, { sample: sampleMode });
         cache.current.set(n, URL.createObjectURL(blob));
+        // keep memory sane on long books
+        if (cache.current.size > MAX_CACHED) {
+          const keep = [page, page + 1, page - 1, page + 2];
+          for (const [key, url] of cache.current) {
+            if (!keep.includes(key) && cache.current.size > MAX_CACHED) {
+              URL.revokeObjectURL(url);
+              cache.current.delete(key);
+            }
+          }
+        }
         setTick((t) => t + 1);
       } catch (err: any) {
         setFlash(err?.message || "Page load nahi hua");
+        window.setTimeout(() => setFlash(null), 2600);
       } finally {
         setLoadingPage(false);
       }
     },
-    [bookId, sampleMode],
+    [bookId, sampleMode, page],
   );
 
   useEffect(() => {
     if (status !== "ready") return;
     void loadPage(page);
-    if (page + 1 <= total) void loadPage(page + 1);
-    if (page - 1 >= 1) void loadPage(page - 1);
+    for (const n of [page + 1, page + 2, page - 1]) {
+      if (n >= 1 && n <= total) void loadPage(n);
+    }
     if (!sampleMode) localStorage.setItem(PAGE_KEY(bookId), String(page));
+    scrollRef.current?.scrollTo({ top: 0 });
   }, [page, status, total, sampleMode, bookId, loadPage]);
 
   useEffect(
@@ -124,11 +159,61 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
     [],
   );
 
-  /* ── 3. deterrence: shortcuts, menus, printing, tab switching ─────── */
+  /* ── 3. chrome auto-hide ───────────────────────────────────────────── */
+  const revealChrome = useCallback(() => {
+    setChrome(true);
+    if (hideTimer.current) window.clearTimeout(hideTimer.current);
+    hideTimer.current = window.setTimeout(() => setChrome(false), 3600);
+  }, []);
+
+  useEffect(() => {
+    if (status === "ready") revealChrome();
+    return () => {
+      if (hideTimer.current) window.clearTimeout(hideTimer.current);
+    };
+  }, [status, revealChrome]);
+
+  /* ── 4. deterrence: shortcuts, menus, printing, tab switching ─────── */
   const warn = useCallback((text: string) => {
     setFlash(text);
     window.setTimeout(() => setFlash(null), 2600);
   }, []);
+
+  const go = useCallback(
+    (n: number) => {
+      setPage((prev) => {
+        const next = Math.min(total, Math.max(1, n));
+        return next === prev ? prev : next;
+      });
+      revealChrome();
+    },
+    [total, revealChrome],
+  );
+
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+        setIsFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    } catch {
+      warn("Is browser me fullscreen nahi khul paya");
+    }
+  };
+
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
+
+  const setThemePersisted = (next: Theme) => {
+    setTheme(next);
+    localStorage.setItem(THEME_KEY, next);
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -140,11 +225,17 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
         return;
       }
       if (e.key === "PrintScreen") {
-        warn("Screenshot par aapki ID chhap chuki hai — leak trackable hai.");
+        warn("Screenshot par aapki ID chhapi hui hai — leak trackable hai.");
       }
-      if (e.key === "ArrowRight") setPage((p) => Math.min(total, p + 1));
-      if (e.key === "ArrowLeft") setPage((p) => Math.max(1, p - 1));
-      if (e.key === "Escape") onClose();
+      if (e.key === "ArrowRight") go(page + 1);
+      if (e.key === "ArrowLeft") go(page - 1);
+      if (e.key === "Home") go(1);
+      if (e.key === "End") go(total);
+      if (e.key === "Escape" && !document.fullscreenElement) onClose();
+      if (e.key === " " || e.key === "Enter") {
+        e.preventDefault();
+        setChrome((c) => !c);
+      }
     };
     const block = (e: Event) => e.preventDefault();
     const onVisibility = () => setHidden(document.visibilityState === "hidden");
@@ -165,6 +256,15 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
     style.textContent = "@media print{body{display:none !important}}";
     document.head.appendChild(style);
 
+    // Site chrome (bottom nav, chat bubble) would sit under the reader anyway —
+    // hide it so nothing steals taps while a student is reading.
+    const hiddenNodes: { el: HTMLElement; display: string }[] = [];
+    const selector = 'nav[aria-label="Bottom navigation"], button[aria-label="Chat with Cronyzo"]';
+    document.querySelectorAll<HTMLElement>(selector).forEach((el) => {
+      hiddenNodes.push({ el, display: el.style.display });
+      el.style.display = "none";
+    });
+
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
@@ -178,12 +278,14 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
       window.removeEventListener("blur", onBlur);
       window.removeEventListener("focus", onFocus);
       document.getElementById("cz-reader-print-guard")?.remove();
+      hiddenNodes.forEach(({ el, display }) => {
+        el.style.display = display;
+      });
       document.body.style.overflow = prevOverflow;
     };
-  }, [total, onClose, warn]);
+  }, [page, total, onClose, warn, go]);
 
-  /* swipe on phones */
-  const touchX = useRef<number | null>(null);
+  /* ── 5. touch: tap left/right to turn, swipe, middle tap toggles ──── */
   const onTouchStart = (e: React.TouchEvent) => {
     touchX.current = e.touches[0]?.clientX ?? null;
   };
@@ -192,62 +294,107 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
     touchX.current = null;
     if (start == null) return;
     const dx = (e.changedTouches[0]?.clientX ?? start) - start;
-    if (Math.abs(dx) < 60) return;
-    setPage((p) => Math.min(total, Math.max(1, p + (dx < 0 ? 1 : -1))));
+    if (Math.abs(dx) > 55) {
+      go(page + (dx < 0 ? 1 : -1));
+    } else {
+      setChrome((c) => !c);
+    }
+  };
+
+  /** tap zones for mouse + phone taps that do not turn into a drag */
+  const onSurfaceClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    if (x < rect.width * 0.3) go(page - 1);
+    else if (x > rect.width * 0.7) go(page + 1);
+    else setChrome((c) => !c);
   };
 
   const currentUrl = cache.current.get(page);
-  const go = (n: number) => setPage(Math.min(total, Math.max(1, n)));
-  const canNext = sampleMode ? true : page < total;
   const pct = useMemo(() => Math.round((page / total) * 100), [page, total]);
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex flex-col bg-slate-950 text-slate-100"
+      className={`fixed inset-0 z-[120] flex flex-col transition-colors duration-300 ${paper}`}
       onContextMenu={(e) => e.preventDefault()}
       onDragStart={(e) => e.preventDefault()}
+      onMouseMove={revealChrome}
       style={{ WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
     >
-      {/* top bar */}
-      <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:px-4">
+      {/* ── top bar (auto-hides, transparent) ─────────────────────────── */}
+      <div
+        className={`pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center gap-2 px-2.5 pb-6 pt-[max(0.5rem,env(safe-area-inset-top))] transition-all duration-300 ${
+          chrome ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0"
+        }`}
+        style={{
+          background:
+            theme === "cream"
+              ? "linear-gradient(to bottom, rgba(246,239,225,0.96), rgba(246,239,225,0))"
+              : "linear-gradient(to bottom, rgba(10,12,16,0.94), rgba(10,12,16,0))",
+        }}
+      >
         <button
           onClick={onClose}
-          className="grid h-9 w-9 place-items-center rounded-full bg-white/10 hover:bg-white/20"
+          className={`pointer-events-auto grid h-9 w-9 shrink-0 place-items-center rounded-full transition active:scale-95 ${
+            theme === "cream" ? "bg-[#2e2a24]/10 hover:bg-[#2e2a24]/20" : "bg-white/12 hover:bg-white/20"
+          }`}
           aria-label="Reader band karein"
         >
-          <X className="h-4.5 w-4.5" />
+          <X className="h-4 w-4" />
         </button>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-bold">{info?.title || title || "E-book"}</p>
-          <p className="truncate text-[10.5px] text-slate-400">
-            {sampleMode ? "Free sample · " : ""}Page {page} / {total} · sirf padhne ke liye
+          <p className="truncate text-[12.5px] font-extrabold">{info?.title || title || "E-book"}</p>
+          <p className="truncate text-[10px] opacity-60">
+            {sampleMode ? "Free sample · " : ""}Page {page} / {total}
           </p>
         </div>
-        <span className="hidden items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-1 text-[10px] font-bold text-emerald-300 sm:inline-flex">
-          <Lock className="h-3 w-3" /> Protected
-        </span>
+        <button
+          onClick={toggleFullscreen}
+          className={`pointer-events-auto grid h-9 w-9 place-items-center rounded-full ${
+            theme === "cream" ? "bg-[#2e2a24]/10" : "bg-white/12"
+          }`}
+          aria-label="Fullscreen"
+        >
+          {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+        </button>
+        <button
+          onClick={() => setThemePersisted(theme === "cream" ? "night" : "cream")}
+          className={`pointer-events-auto grid h-9 w-9 place-items-center rounded-full ${
+            theme === "cream" ? "bg-[#2e2a24]/10" : "bg-white/12"
+          }`}
+          aria-label="Theme badlein"
+        >
+          {theme === "cream" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+        </button>
       </div>
 
-      {/* page area */}
+      {/* ── the page itself ───────────────────────────────────────────── */}
       <div
-        className="relative flex-1 overflow-auto overscroll-contain bg-slate-900"
+        ref={scrollRef}
+        className="relative flex-1 overflow-auto overscroll-contain"
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
+        onClick={onSurfaceClick}
       >
         <div
-          className={`mx-auto flex min-h-full w-full items-start justify-center p-3 transition-all duration-200 ${
+          className={`mx-auto flex min-h-full w-full items-start justify-center px-2 py-2 transition-all duration-200 ${
             hidden ? "blur-2xl" : ""
           }`}
         >
           {status === "loading" && (
-            <div className="flex h-64 items-center justify-center gap-2 text-sm text-slate-400">
+            <div className="flex h-64 items-center justify-center gap-2 text-sm opacity-60">
               <Loader2 className="h-4 w-4 animate-spin" /> Book khul rahi hai…
             </div>
           )}
 
           {status === "blocked" && (
-            <div className="mt-10 max-w-sm rounded-2xl bg-white/5 p-6 text-center">
-              <Lock className="mx-auto mb-3 h-6 w-6 text-amber-300" />
+            <div
+              className={`pointer-events-auto mt-10 max-w-sm rounded-2xl p-6 text-center ${
+                theme === "cream" ? "bg-[#2e2a24]/5" : "bg-white/5"
+              }`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Lock className="mx-auto mb-3 h-6 w-6 text-amber-500" />
               <p className="text-sm font-semibold">{message}</p>
               {onNeedsPurchase && (
                 <button
@@ -264,27 +411,42 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
           )}
 
           {status === "ready" && currentUrl && (
-            <img
-              src={currentUrl}
-              alt={`Page ${page}`}
-              draggable={false}
-              className="mx-auto h-auto select-none rounded-lg bg-white shadow-2xl"
-              style={{ width: `${Math.round(zoom * 100)}%`, maxWidth: zoom > 1 ? "none" : "820px" }}
-            />
+            <div className="relative w-full">
+              <img
+                src={currentUrl}
+                alt={`Page ${page}`}
+                draggable={false}
+                className="mx-auto h-auto select-none rounded-md bg-white shadow-[0_10px_40px_rgba(0,0,0,0.16)]"
+                style={{ width: `${Math.round(zoom * 100)}%`, maxWidth: zoom > 1 ? "none" : "860px" }}
+              />
+              {/* last page of a sample → soft CTA, not a wall */}
+              {sampleMode && page >= total && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onClose();
+                    onNeedsPurchase?.();
+                  }}
+                  className="mx-auto mt-3 mb-6 block w-full max-w-sm rounded-xl bg-primary px-4 py-3 text-[12.5px] font-bold text-white shadow-lg"
+                >
+                  Sample khatam — poori e-book kharidein, yahin padhein →
+                </button>
+              )}
+            </div>
           )}
 
           {status === "ready" && !currentUrl && (
-            <div className="flex h-64 items-center justify-center gap-2 text-sm text-slate-400">
+            <div className="flex h-64 items-center justify-center gap-2 text-sm opacity-60">
               <Loader2 className="h-4 w-4 animate-spin" /> Page {page} load ho raha hai…
             </div>
           )}
         </div>
 
         {hidden && (
-          <div className="pointer-events-none absolute inset-0 grid place-items-center bg-slate-950/80">
-            <div className="rounded-xl bg-white/10 px-4 py-3 text-center text-xs font-semibold text-slate-200">
+          <div className="pointer-events-none absolute inset-0 grid place-items-center bg-black/60">
+            <div className="rounded-xl bg-white/10 px-4 py-3 text-center text-xs font-semibold text-white">
               Padhai pause
-              <p className="mt-1 text-[10.5px] font-normal text-slate-400">
+              <p className="mt-1 text-[10.5px] font-normal text-white/70">
                 Wapas aane par page khud khul jayega
               </p>
             </div>
@@ -292,74 +454,132 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
         )}
       </div>
 
-      {/* sample paywall strip */}
-      {sampleMode && (
-        <button
-          onClick={() => {
-            onClose();
-            onNeedsPurchase?.();
-          }}
-          className="border-t border-amber-400/30 bg-amber-500/15 px-4 py-2 text-[11.5px] font-bold text-amber-200"
-        >
-          Sample khatam? Poori e-book kharidein — phir yahin, Cronyzo par padhein →
-        </button>
-      )}
+      {/* ── floating show/hide control (always reachable) ─────────────── */}
+      <button
+        onClick={() => setChrome((c) => !c)}
+        className={`absolute right-2 top-1/2 z-30 grid h-10 w-7 -translate-y-1/2 place-items-center rounded-full border backdrop-blur transition-all duration-300 ${
+          theme === "cream"
+            ? "border-[#2e2a24]/15 bg-[#f6efe1]/70 text-[#2e2a24]"
+            : "border-white/15 bg-black/45 text-white"
+        } ${chrome ? "opacity-0" : "opacity-80 hover:opacity-100"}`}
+        aria-label={chrome ? "Controls chhupayein" : "Controls dikhayein"}
+      >
+        {chrome ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+      </button>
 
-      {/* bottom controls */}
-      <div className="border-t border-white/10 px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-        <div className="mb-1.5 h-1 w-full overflow-hidden rounded-full bg-white/10">
-          <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+      {/* ── bottom controls (auto-hide, transparent) ──────────────────── */}
+      <div
+        className={`absolute inset-x-0 bottom-0 z-20 px-2 pb-[max(0.6rem,env(safe-area-inset-bottom))] pt-8 transition-all duration-300 ${
+          chrome ? "translate-y-0 opacity-100" : "translate-y-full opacity-0"
+        }`}
+        style={{
+          background:
+            theme === "cream"
+              ? "linear-gradient(to top, rgba(246,239,225,0.97), rgba(246,239,225,0))"
+              : "linear-gradient(to top, rgba(10,12,16,0.95), rgba(10,12,16,0))",
+        }}
+      >
+        {/* page slider — drag to jump anywhere in the book */}
+        <div className="mx-auto mb-1 flex max-w-md items-center gap-2 px-1">
+          <span className="w-8 text-right text-[10px] font-bold tabular-nums opacity-60">{page}</span>
+          <input
+            type="range"
+            min={1}
+            max={total}
+            value={page}
+            onChange={(e) => go(Number(e.target.value))}
+            className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-current/20 accent-primary"
+            aria-label="Page slider"
+            style={{ accentColor: "#4f46e5" }}
+          />
+          <span className="w-8 text-[10px] font-bold tabular-nums opacity-60">{total}</span>
         </div>
-        <div className="flex items-center justify-center gap-1.5">
+
+        <div className="mx-auto flex max-w-md items-center justify-between gap-1">
+          <button
+            onClick={() => go(1)}
+            className={`grid h-10 w-10 place-items-center rounded-full ${
+              theme === "cream" ? "bg-[#2e2a24]/8" : "bg-white/10"
+            }`}
+            aria-label="Pehla page"
+          >
+            <ChevronsLeft className="h-4 w-4" />
+          </button>
           <button
             onClick={() => go(page - 1)}
             disabled={page <= 1}
-            className="grid h-9 w-9 place-items-center rounded-full bg-white/10 disabled:opacity-35"
+            className={`grid h-11 w-11 place-items-center rounded-full disabled:opacity-30 ${
+              theme === "cream" ? "bg-[#2e2a24]/12" : "bg-white/14"
+            }`}
             aria-label="Pichla page"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="h-5 w-5" />
           </button>
-          <input
-            type="number"
-            value={page}
-            min={1}
-            max={total}
-            onChange={(e) => go(Number(e.target.value) || 1)}
-            className="h-9 w-14 rounded-lg bg-white/10 text-center text-[12px] font-bold outline-none"
+
+          <button
+            onClick={() => setChrome(false)}
+            className={`flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full text-[12px] font-bold tabular-nums ${
+              theme === "cream" ? "bg-[#2e2a24]/8" : "bg-white/10"
+            }`}
             aria-label="Page number"
-          />
-          <span className="text-[11px] text-slate-400">/ {total}</span>
+          >
+            {loadingPage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            {page} <span className="opacity-50">/ {total}</span>
+          </button>
+
           <button
             onClick={() => go(page + 1)}
-            disabled={!canNext && page >= total}
-            className="grid h-9 w-9 place-items-center rounded-full bg-white/10 disabled:opacity-35"
+            disabled={page >= total}
+            className={`grid h-11 w-11 place-items-center rounded-full disabled:opacity-30 ${
+              theme === "cream" ? "bg-[#2e2a24]/12" : "bg-white/14"
+            }`}
             aria-label="Agla page"
           >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-          <div className="mx-1 h-6 w-px bg-white/10" />
-          <button
-            onClick={() => setZoom((z) => Math.max(0.6, +(z - 0.15).toFixed(2)))}
-            className="grid h-9 w-9 place-items-center rounded-full bg-white/10"
-            aria-label="Chhota karein"
-          >
-            <Minus className="h-4 w-4" />
+            <ChevronRight className="h-5 w-5" />
           </button>
           <button
-            onClick={() => setZoom((z) => Math.min(2.5, +(z + 0.15).toFixed(2)))}
-            className="grid h-9 w-9 place-items-center rounded-full bg-white/10"
-            aria-label="Bada karein"
+            onClick={() => go(total)}
+            className={`grid h-10 w-10 place-items-center rounded-full ${
+              theme === "cream" ? "bg-[#2e2a24]/8" : "bg-white/10"
+            }`}
+            aria-label="Aakhri page"
           >
-            <Plus className="h-4 w-4" />
+            <ChevronsRight className="h-4 w-4" />
           </button>
         </div>
-        <p className="mt-1 truncate text-center text-[9.5px] text-slate-500">
-          {loadingPage ? "loading…" : `Watermark: ${info?.watermark || "Cronyzo"}`} · screenshot band nahi ho sakta, par trackable hai
-        </p>
+
+        <div className="mx-auto mt-1 flex max-w-md items-center justify-between px-2">
+          <button
+            onClick={() => setZoom((z) => Math.max(0.7, +(z - 0.15).toFixed(2)))}
+            className="text-[11px] font-bold opacity-60"
+            aria-label="Chhota karein"
+          >
+            A− 
+          </button>
+          <p className="text-[9.5px] opacity-45">
+            {Math.round(zoom * 100)}% · {pct}% padha · sirf Cronyzo par
+          </p>
+          <button
+            onClick={() => setZoom((z) => Math.min(2.4, +(z + 0.15).toFixed(2)))}
+            className="text-[12px] font-bold opacity-60"
+            aria-label="Bada karein"
+          >
+            A+
+          </button>
+        </div>
       </div>
 
+      {/* tiny corner watermark note (always visible, never in the way) */}
+      <span
+        className={`pointer-events-none absolute bottom-1 left-2 z-10 text-[8.5px] transition-opacity duration-300 ${
+          chrome ? "opacity-0" : "opacity-40"
+        }`}
+      >
+        {info?.watermark || "Cronyzo"}
+      </span>
+
       {flash && (
-        <div className="pointer-events-none absolute inset-x-3 bottom-24 mx-auto max-w-sm rounded-xl bg-slate-100 px-3 py-2 text-center text-[11.5px] font-bold text-slate-900 shadow-lg">
+        <div className="pointer-events-none absolute inset-x-3 bottom-28 z-30 mx-auto max-w-sm rounded-xl bg-slate-900/92 px-3 py-2 text-center text-[11.5px] font-bold text-white shadow-xl">
           {flash}
         </div>
       )}

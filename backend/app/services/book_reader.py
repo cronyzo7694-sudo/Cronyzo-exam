@@ -394,3 +394,34 @@ def auto_sample(book, *, pages: Optional[int] = None, force: bool = False) -> Tu
 
     logger.info("auto sample for book=%s pages=%s", book.id, count)
     return count, None
+
+
+def spawn_auto_sample(book_id: int, *, pages: Optional[int] = None, force: bool = False) -> None:
+    """Build the sample off the request thread.
+
+    Importing a Drive link can take a few seconds, and a seller should never
+    stare at a spinner for that: the book saves instantly and the sample
+    appears by itself a moment later.
+    """
+    import threading
+
+    def _work() -> None:
+        try:
+            from app import create_app
+
+            app = create_app()
+            with app.app_context():
+                from app.extensions import db
+                from app.models.book import Book
+
+                book = db.session.get(Book, book_id)
+                if book is None:
+                    return
+                if not force and book.preview_pdf_url:
+                    return
+                count, error = auto_sample(book, pages=pages, force=force)
+                logger.info("background sample book=%s pages=%s err=%s", book_id, count, error)
+        except Exception:  # noqa: BLE001
+            logger.exception("background sample failed book=%s", book_id)
+
+    threading.Thread(target=_work, name=f"sample-{book_id}", daemon=True).start()
