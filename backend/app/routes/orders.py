@@ -67,6 +67,27 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def book_is_digital(book: "Book") -> bool:
+    """A book that never needs a courier: e-book / PDF edition."""
+    fmt = str(getattr(book, "format", "") or "").strip().lower()
+    if fmt in ("ebook", "e-book", "pdf", "digital"):
+        return True
+    if fmt in ("paperback", "hardcover", "hardbound", "printed"):
+        return False
+    # no format set but a PDF is attached → treat as digital
+    return bool(getattr(book, "pdf_url", None))
+
+
+def line_is_physical(line) -> bool:
+    """Does this basket line need an address, a courier and a shipping fee?"""
+    obj = line.obj
+    if isinstance(obj, Product):
+        return (obj.fulfillment or "physical") == "physical"
+    if isinstance(obj, Book):
+        return not book_is_digital(obj)
+    return False  # courses, test series — pure digital
+
+
 def _clean(value: Any, limit: int) -> Optional[str]:
     if value is None:
         return None
@@ -330,20 +351,14 @@ def checkout():
 
     # --- totals -----------------------------------------------------------
     line_inputs = [{"unit_price": line.unit_price, "qty": line.qty} for line in lines]
-    has_physical = any(
-        (line.obj.fulfillment or "physical") == "physical"
-        for line in lines
-        if isinstance(line.obj, Product)
-    )
+    has_physical = any(line_is_physical(line) for line in lines)
 
     # Courier charge is per listing: the seller sets it on the product/book.
     # If nobody set anything we fall back to the flat platform rule.
     seller_shipping = 0.0
     for line in lines:
         obj = line.obj
-        if isinstance(obj, Product) and (obj.fulfillment or "physical") == "physical":
-            seller_shipping += float(getattr(obj, "shipping_fee", 0) or 0) * line.qty
-        elif isinstance(obj, Book) and not (getattr(obj, "is_digital", False)):
+        if line_is_physical(line):
             seller_shipping += float(getattr(obj, "shipping_fee", 0) or 0) * line.qty
 
     coupon_code = _clean(payload.get("coupon_code"), 40) or ""
@@ -357,13 +372,48 @@ def checkout():
         shipping_fee=round(seller_shipping, 2) if seller_shipping > 0 else None,
     )
 
+    payment_method_hint = (str(payload.get("payment_method") or "cod").strip().lower())[:32]
+
     if float(totals["total"]) <= 0:
         return jsonify({"error": "Order total must be greater than zero"}), 400
+
+    # --- payments gate -----------------------------------------------------
+    # Until Razorpay keys are configured on the server, every purchase is
+    # refused. No dummy "paid" orders can slip through and nobody gets a free
+    # copy by accident. The admin alone may keep testing the flow.
+    from app.services.payments import gateway_mode
+
+    if gateway_mode() != "razorpay" and (user.role or "") != "admin":
+        return (
+            jsonify(
+                {
+                    "error": "Online payment abhi shuru nahi hua. Order abhi band hai — jald hi khul jayega.",
+                    "code": "payments_off",
+                }
+            ),
+            503,
+        )
+
+    # A pure-digital basket (e-book, PDF, course, test series) has nothing to
+    # ship: no cash on delivery, no address, no courier charge.
+    if not has_physical and payment_method_hint == "cod":
+        return (
+            jsonify(
+                {
+                    "error": "E-book / test series delivery nahi hoti — online payment hi lagega.",
+                    "code": "cod_not_allowed",
+                }
+            ),
+            400,
+        )
 
     # --- delivery address --------------------------------------------------
     address_payload = payload.get("address")
     address_id = _safe_int(payload.get("address_id"), 0)
     address_row = None
+    if not has_physical:
+        address_payload = None
+        address_id = 0
     if address_id > 0:
         address_row = Address.query.filter_by(id=address_id, user_id=user.id).first()
         if address_row is None:
@@ -396,7 +446,9 @@ def checkout():
     order = Order(
         order_number=generate_order_number(),
         user_id=user.id,
-        status="paid" if payment_method != "cod" else "confirmed",
+        status=(
+            "delivered" if not has_physical else ("paid" if payment_method != "cod" else "confirmed")
+        ),
         payment_status="paid",
         payment_method=payment_method,
         subtotal=float(totals["subtotal"]),
@@ -437,7 +489,8 @@ def checkout():
             obj.stock = max(0, int(obj.stock or 0) - line.qty)
             obj.sold_count = int(obj.sold_count or 0) + line.qty
         elif isinstance(obj, Book):
-            obj.stock = max(0, int(obj.stock or 0) - line.qty)
+            if not book_is_digital(obj):
+                obj.stock = max(0, int(obj.stock or 0) - line.qty)
             obj.sold_count = int(obj.sold_count or 0) + line.qty
         elif isinstance(obj, Course):
             obj.student_count = int(obj.student_count or 0) + line.qty
@@ -454,7 +507,11 @@ def checkout():
             note=(
                 "Order placed — cash on delivery"
                 if payment_method == "cod"
-                else "Order placed — payment received"
+                else (
+                    "Digital order — library me turant add ho gaya"
+                    if not has_physical
+                    else "Order placed — payment received"
+                )
             ),
             actor_id=user.id,
             actor_role=user.role,
@@ -538,11 +595,15 @@ def cancel_order(order_id):
     if order.user_id != user.id and user.role != "admin":
         return jsonify({"error": "Order not found"}), 404
 
-    if order.status in ("shipped", "delivered", "cancelled", "refunded"):
-        return jsonify({"error": f"Cannot cancel a {order.status} order"}), 409
+    is_digital = not (order.address_json or "").strip()
+    if order.status in ("shipped", "out_for_delivery", "cancelled", "refunded"):
+        return jsonify({"error": "Courier ja chuka hai — ab cancel nahi ho sakta."}), 409
+    if order.status == "delivered" and not is_digital:
+        return jsonify({"error": "Deliver ho chuka hai — cancel nahi ho sakta."}), 409
 
     order.status = "cancelled"
-    order.payment_status = "refunded"
+    # Money only goes back if money came in.
+    order.payment_status = "cancelled" if order.payment_method == "cod" else "refunded"
 
     # Restock physical items
     for item in order.items:
@@ -554,14 +615,22 @@ def cancel_order(order_id):
         elif item.item_type == "book":
             book = Book.query.get(item.item_id)
             if book is not None:
-                book.stock = int(book.stock or 0) + int(item.qty or 0)
+                if not book_is_digital(book):
+                    book.stock = int(book.stock or 0) + int(item.qty or 0)
                 book.sold_count = max(0, int(book.sold_count or 0) - int(item.qty or 0))
+        elif item.item_type == "course":
+            Enrollment.query.filter_by(user_id=order.user_id, course_id=item.item_id).delete(
+                synchronize_session=False
+            )
+            course = Course.query.get(item.item_id)
+            if course is not None:
+                course.student_count = max(0, int(course.student_count or 0) - int(item.qty or 0))
 
     db.session.add(
         OrderEvent(
             order_id=order.id,
             status="cancelled",
-            note="Order cancelled",
+            note="Order cancel hua" + (" — refund 3-5 din me" if order.payment_status == "refunded" else ""),
             actor_id=user.id,
             actor_role=user.role,
         )

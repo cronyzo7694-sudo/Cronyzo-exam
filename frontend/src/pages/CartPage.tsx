@@ -14,11 +14,13 @@ import {
 } from "lucide-react";
 import { useEffect } from "react";
 import { useCartStore } from "@/stores/cartStore";
+import { usePaymentsReady } from "@/hooks/usePaymentsReady";
 import { Button } from "@/components/ui/button";
 import { EmptyState, Price } from "@/components/commerce/Primitives";
 
 export function CartPage() {
   const navigate = useNavigate();
+  const paymentsReady = usePaymentsReady();
   const {
     items,
     totals,
@@ -255,11 +257,17 @@ export function CartPage() {
               <Button
                 className="mt-5 w-full"
                 size="lg"
+                disabled={!paymentsReady.ready}
                 onClick={() => navigate({ to: "/checkout" })}
               >
-                Proceed to checkout
+                {paymentsReady.ready ? "Proceed to checkout" : "Payment jald shuru hoga"}
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
+              {!paymentsReady.ready && (
+                <p className="mt-2 text-center text-[11px] font-medium leading-relaxed text-muted-foreground">
+                  Online payment abhi set nahi hua — cart safe hai, order baad me karein.
+                </p>
+              )}
 
               <Link
                 to="/shop"

@@ -3,7 +3,7 @@
  */
 
 import { Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookOpen,
   CheckCircle2,
@@ -11,6 +11,7 @@ import {
   Package,
   Receipt,
   Truck,
+  Undo2,
   XCircle,
 } from "lucide-react";
 import { useState } from "react";
@@ -31,12 +32,27 @@ const STATUS_STYLE: Record<string, string> = {
 
 const FILTERS = ["all", "paid", "confirmed", "shipped", "delivered", "cancelled"];
 
+const CANCELABLE = ["pending", "confirmed", "paid"];
+/** Digital orders finish instantly, so "delivered" is still cancellable. */
+const canCancel = (order: Order) =>
+  CANCELABLE.includes(order.status) || (order.status === "delivered" && !order.address);
+
 export function OrdersPage() {
   const [filter, setFilter] = useState("all");
+  const [confirmId, setConfirmId] = useState<number | null>(null);
+  const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
     queryKey: ["orders", filter],
     queryFn: () => ordersApi.mine(filter === "all" ? undefined : filter),
+  });
+
+  const cancelOrder = useMutation({
+    mutationFn: (id: number) => ordersApi.cancel(id),
+    onSuccess: () => {
+      setConfirmId(null);
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+    },
   });
 
   const items = data?.items ?? [];
@@ -228,7 +244,7 @@ export function OrdersPage() {
                 {order.status === "delivered" && (
                   <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600">
                     <CheckCircle2 className="h-3.5 w-3.5" />
-                    Delivered
+                    {order.address ? "Delivered" : "Library me add ho gaya"}
                   </span>
                 )}
                 {order.status === "cancelled" && (
@@ -237,7 +253,18 @@ export function OrdersPage() {
                     Cancelled — refund initiated
                   </span>
                 )}
-                <div className="ml-auto flex gap-2">
+                <div className="ml-auto flex flex-wrap gap-2">
+                  {canCancel(order) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-destructive/30 text-destructive hover:bg-destructive/5"
+                      onClick={() => setConfirmId(order.id)}
+                    >
+                      <Undo2 className="mr-1 h-3.5 w-3.5" />
+                      Cancel order
+                    </Button>
+                  )}
                   {order.items.some((i) => i.item_type === "course") && (
                     <Button asChild variant="ghost" size="sm">
                       <Link to="/my-courses">Go to learning</Link>
@@ -250,6 +277,40 @@ export function OrdersPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {confirmId !== null && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl border bg-card p-6 shadow-xl">
+            <h3 className="text-base font-bold text-foreground">Order cancel karna hai?</h3>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              Order turant cancel ho jayega. Online payment kiya tha to refund 3–5 din me wapas
+              aayega; e-book / test series ka access bhi hat jayega.
+            </p>
+            {cancelOrder.isError && (
+              <p className="mt-3 rounded-lg bg-destructive/8 px-3 py-2 text-xs font-medium text-destructive">
+                {(cancelOrder.error as Error)?.message ?? "Cancel nahi ho paya"}
+              </p>
+            )}
+            <div className="mt-5 flex gap-2">
+              <Button
+                variant="ghost"
+                className="flex-1"
+                onClick={() => setConfirmId(null)}
+                disabled={cancelOrder.isPending}
+              >
+                Nahi, rehne do
+              </Button>
+              <Button
+                className="flex-1 bg-destructive text-white hover:bg-destructive/90"
+                onClick={() => cancelOrder.mutate(confirmId)}
+                disabled={cancelOrder.isPending}
+              >
+                {cancelOrder.isPending ? "Cancelling…" : "Haan, cancel karo"}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

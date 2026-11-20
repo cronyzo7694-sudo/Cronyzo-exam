@@ -21,9 +21,12 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  BookOpen,
   Eye,
   EyeOff,
   Maximize2,
+  Rows3,
+  SunMedium,
   Minimize2,
   Lock,
   Loader2,
@@ -72,6 +75,20 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
   const gesture = useRef<{ x: number; y: number; t: number } | null>(null);
   const lastScroll = useRef(0);
   const [turnChip, setTurnChip] = useState<string | null>(null);
+  // archive.org lets a reader choose: one page at a time, or one long scroll.
+  const [view, setView] = useState<"single" | "scroll">(() =>
+    typeof localStorage !== "undefined" && localStorage.getItem("cz_reader_view") === "scroll"
+      ? "scroll"
+      : "single",
+  );
+  const [dim, setDim] = useState<number>(() =>
+    Math.min(70, Math.max(0, Number(localStorage.getItem("cz_reader_dim") || 0))),
+  );
+  const [fit, setFit] = useState<"page" | "width">(() =>
+    typeof localStorage !== "undefined" && localStorage.getItem("cz_reader_fit") === "width"
+      ? "width"
+      : "page",
+  );
 
   /* ── 1. what may this caller read? ─────────────────────────────────── */
   useEffect(() => {
@@ -124,7 +141,7 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
         const blob = await booksApi.pageImage(bookId, n, { sample: sampleMode });
         cache.current.set(n, URL.createObjectURL(blob));
         // keep memory sane on long books
-        if (cache.current.size > MAX_CACHED) {
+        if (cache.current.size > MAX_CACHED && view !== "scroll") {
           const keep = [page, page + 1, page - 1, page + 2];
           for (const [key, url] of cache.current) {
             if (!keep.includes(key) && cache.current.size > MAX_CACHED) {
@@ -141,7 +158,7 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
         setLoadingPage(false);
       }
     },
-    [bookId, sampleMode, page],
+    [bookId, sampleMode, page, view],
   );
 
   useEffect(() => {
@@ -151,7 +168,6 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
       if (n >= 1 && n <= total) void loadPage(n);
     }
     if (!sampleMode) localStorage.setItem(PAGE_KEY(bookId), String(page));
-    scrollRef.current?.scrollTo({ top: 0 });
   }, [page, status, total, sampleMode, bookId, loadPage]);
 
   useEffect(
@@ -169,11 +185,77 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
     hideTimer.current = window.setTimeout(() => setChrome(false), 3600);
   }, []);
 
+  /* ── 3b. continuous scroll mode ───────────────────────────────────────
+     One observer loads pages just before they reach the screen, a second one
+     tracks which page the reader is on, and anything scrolled far away is
+     released so a 400-page book never eats the phone's memory. */
+  useEffect(() => {
+    if (status !== "ready" || view !== "scroll") return;
+    const root = scrollRef.current;
+    if (!root) return;
+    const slots = Array.from(root.querySelectorAll<HTMLElement>("[data-page]"));
+
+    const loader = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          const n = Number((entry.target as HTMLElement).dataset.page);
+          if (n >= 1 && n <= total) void loadPage(n);
+        });
+      },
+      { root, rootMargin: "1400px 0px" },
+    );
+    const tracker = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          const n = Number((entry.target as HTMLElement).dataset.page);
+          if (n >= 1 && n <= total) setPage(n);
+        });
+      },
+      { root, threshold: 0.45 },
+    );
+    const reaper = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) return;
+          const n = Number((entry.target as HTMLElement).dataset.page);
+          const url = cache.current.get(n);
+          if (url && Math.abs(n - page) > 20) {
+            URL.revokeObjectURL(url);
+            cache.current.delete(n);
+            setTick((t) => t + 1);
+          }
+        });
+      },
+      { root, rootMargin: "3200px 0px" },
+    );
+
+    slots.forEach((el) => {
+      loader.observe(el);
+      tracker.observe(el);
+      reaper.observe(el);
+    });
+    return () => {
+      loader.disconnect();
+      tracker.disconnect();
+      reaper.disconnect();
+    };
+  }, [status, view, total, loadPage, page]);
+
+  // land on the page the reader left off at when switching into scroll view
+  useEffect(() => {
+    if (view !== "scroll" || status !== "ready") return;
+    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-page="${page}"]`);
+    if (el) el.scrollIntoView({ block: "start" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, status]);
+
   useEffect(() => {
     if (status !== "ready") return;
     if (!localStorage.getItem("cz_reader_hint")) {
       localStorage.setItem("cz_reader_hint", "1");
-      setFlash("Page badalne ke liye side ke ⬅➡ arrows dabayein ya swipe karein");
+      setFlash("⬅➡ arrows ya swipe se page — ya neeche 'Scroll' dabakar poori book ek saath padhein");
       window.setTimeout(() => setFlash(null), 4200);
     }
   }, [status]);
@@ -193,10 +275,15 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
 
   const go = useCallback(
     (n: number) => {
-      setPage((prev) => {
-        const next = Math.min(total, Math.max(1, n));
-        return next === prev ? prev : next;
-      });
+      const next = Math.min(total, Math.max(1, n));
+      setPage((prev) => (next === prev ? prev : next));
+      if (view === "scroll") {
+        scrollRef.current
+          ?.querySelector<HTMLElement>(`[data-page="${next}"]`)
+          ?.scrollIntoView({ block: "start" });
+      } else {
+        scrollRef.current?.scrollTo({ top: 0 });
+      }
       revealChrome();
     },
     [total, revealChrome],
@@ -403,7 +490,8 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
         <div className="min-w-0 flex-1">
           <p className="truncate text-[12.5px] font-extrabold">{info?.title || title || "E-book"}</p>
           <p className="truncate text-[10px] opacity-60">
-            {sampleMode ? "Free sample · " : ""}Page {page} / {total}
+            {sampleMode ? "Free sample · " : ""}Page {page} / {total} · {pct}%
+            {total > 1 ? ` · ~${Math.max(1, Math.round(((total - page) * 40) / 60))} min baaki` : ""}
           </p>
         </div>
         <button
@@ -470,14 +558,28 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
             </div>
           )}
 
-          {status === "ready" && currentUrl && (
+          {status === "ready" && view === "single" && currentUrl && (
             <div className="relative w-full">
               <img
+                key={currentUrl}
                 src={currentUrl}
                 alt={`Page ${page}`}
                 draggable={false}
                 className="mx-auto h-auto select-none rounded-md bg-white shadow-[0_10px_40px_rgba(0,0,0,0.16)]"
-                style={{ width: `${Math.round(zoom * 100)}%`, maxWidth: zoom > 1 ? "none" : "860px" }}
+                style={
+                  fit === "width"
+                    ? {
+                        width: `${Math.round(zoom * 100)}%`,
+                        maxWidth: zoom > 1 ? "none" : "100%",
+                        animation: "fade-in 180ms ease-out",
+                      }
+                    : {
+                        maxHeight: "calc(100dvh - 24px)",
+                        width: "auto",
+                        maxWidth: "100%",
+                        animation: "fade-in 180ms ease-out",
+                      }
+                }
               />
               {/* last page of a sample → soft CTA, not a wall */}
               {sampleMode && page >= total && (
@@ -495,12 +597,62 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
             </div>
           )}
 
-          {status === "ready" && !currentUrl && (
+          {status === "ready" && view === "single" && !currentUrl && (
             <div className="flex h-64 items-center justify-center gap-2 text-sm opacity-60">
               <Loader2 className="h-4 w-4 animate-spin" /> Page {page} load ho raha hai…
             </div>
           )}
+
+          {/* ── continuous scroll: the whole book, one smooth strip ───── */}
+          {status === "ready" && view === "scroll" && (
+            <div className="mx-auto w-full max-w-[900px] space-y-1.5 pb-24">
+              {Array.from({ length: total }, (_, i) => i + 1).map((n) => {
+                const url = cache.current.get(n) ?? null;
+                return (
+                  <div
+                    key={n}
+                    data-page={n}
+                    className="flex w-full flex-col items-center justify-start"
+                  >
+                    {url ? (
+                      <img
+                        src={url}
+                        alt={`Page ${n}`}
+                        draggable={false}
+                        className="h-auto w-full select-none rounded-sm bg-white shadow-[0_2px_14px_rgba(0,0,0,0.12)]"
+                        style={{
+                          animation: "fade-in 200ms ease-out",
+                          maxWidth: fit === "width" ? "none" : "860px",
+                        }}
+                      />
+                    ) : (
+                      <div
+                        className={`flex w-full max-w-[860px] items-center justify-center rounded-sm ${
+                          theme === "cream" ? "bg-[#2e2a24]/5" : "bg-white/5"
+                        }`}
+                        style={{ aspectRatio: "1 / 1.414" }}
+                      >
+                        <Loader2 className="h-4 w-4 animate-spin opacity-40" />
+                      </div>
+                    )}
+                    {sampleMode && n === total && (
+                      <div className="mt-2 w-full max-w-sm rounded-xl bg-primary px-4 py-3 text-center text-[12.5px] font-bold text-white shadow-lg">
+                        Sample khatam — poori e-book kharidein, yahin padhein →
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
+
+        {dim > 0 && (
+          <div
+            className="pointer-events-none absolute inset-0 z-[12] bg-black"
+            style={{ opacity: dim / 100 }}
+          />
+        )}
 
         {hidden && (
           <div className="pointer-events-none absolute inset-0 grid place-items-center bg-black/60">
@@ -648,24 +800,74 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
           </button>
         </div>
 
-        <div className="mx-auto mt-1 flex max-w-md items-center justify-between px-2">
+        {/* reading comfort: view, fit, text size, brightness */}
+        <div className="mx-auto mt-1 flex max-w-md items-center justify-between gap-1 px-1">
           <button
             onClick={() => setZoom((z) => Math.max(0.7, +(z - 0.15).toFixed(2)))}
-            className="text-[11px] font-bold opacity-60"
+            className="grid h-8 w-8 place-items-center rounded-full text-[11px] font-bold opacity-60"
             aria-label="Chhota karein"
           >
-            A− 
+            A−
           </button>
-          <p className="text-[9.5px] opacity-45">
-            {Math.round(zoom * 100)}% · {pct}% padha · sirf Cronyzo par
-          </p>
+
+          <button
+            onClick={() => {
+              const next = view === "single" ? "scroll" : "single";
+              setView(next);
+              localStorage.setItem("cz_reader_view", next);
+            }}
+            className={`flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[10.5px] font-bold ${
+              theme === "cream" ? "bg-[#2e2a24]/8" : "bg-white/10"
+            }`}
+            aria-label="Padhne ka tarika badlein"
+          >
+            {view === "single" ? <BookOpen className="h-3.5 w-3.5" /> : <Rows3 className="h-3.5 w-3.5" />}
+            {view === "single" ? "Ek page" : "Scroll"}
+          </button>
+
+          <button
+            onClick={() => {
+              const next = fit === "page" ? "width" : "page";
+              setFit(next);
+              localStorage.setItem("cz_reader_fit", next);
+            }}
+            className={`flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[10.5px] font-bold ${
+              theme === "cream" ? "bg-[#2e2a24]/8" : "bg-white/10"
+            }`}
+            aria-label="Page ka size badlein"
+          >
+            {fit === "page" ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+            {fit === "page" ? "Poora" : "Chauda"}
+          </button>
+
           <button
             onClick={() => setZoom((z) => Math.min(2.4, +(z + 0.15).toFixed(2)))}
-            className="text-[12px] font-bold opacity-60"
+            className="grid h-8 w-8 place-items-center rounded-full text-[12px] font-bold opacity-60"
             aria-label="Bada karein"
           >
             A+
           </button>
+        </div>
+
+        {/* night comfort: gentle screen dim, saved for next time */}
+        <div className="mx-auto mt-1 flex max-w-md items-center gap-2 px-3">
+          <SunMedium className="h-3.5 w-3.5 shrink-0 opacity-45" />
+          <input
+            type="range"
+            min={0}
+            max={70}
+            value={dim}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setDim(v);
+              localStorage.setItem("cz_reader_dim", String(v));
+            }}
+            className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-current/20"
+            aria-label="Screen brightness"
+          />
+          <span className="w-9 text-right text-[9px] font-bold tabular-nums opacity-45">
+            {Math.round(((70 - dim) / 70) * 100)}%
+          </span>
         </div>
       </div>
 

@@ -26,9 +26,18 @@ import { useEffect, useMemo, useState } from "react";
 import { accountApi, booksApi, coursesApi, ordersApi, type Address } from "@/lib/commerce";
 import { examsApi, paymentsApi } from "@/lib/api";
 import { useCartStore } from "@/stores/cartStore";
+import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
 import { Price } from "@/components/commerce/Primitives";
 import { cn } from "@/lib/utils";
+
+/** A listing that never ships: e-book, PDF edition, or digital-only gear. */
+function isDigitalBook(book: any): boolean {
+  const fmt = String(book?.format ?? "").toLowerCase();
+  if (["ebook", "e-book", "pdf", "digital"].includes(fmt)) return true;
+  if (["paperback", "hardcover", "hardbound", "printed"].includes(fmt)) return false;
+  return Boolean(book?.has_pdf);
+}
 
 const PAYMENT_METHODS = [
   { value: "upi", label: "UPI", body: "GPay, PhonePe, Paytm", icon: Smartphone },
@@ -54,6 +63,16 @@ export function CheckoutPage() {
   const [appliedCoupon, setAppliedCoupon] = useState<string | null>(null);
   const [couponError, setCouponError] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
+
+  // Payments stay shut until the gateway keys are on the server: no dummy
+  // orders, so nobody can walk away with a free book by accident.
+  const { data: payCfg } = useQuery({
+    queryKey: ["payments", "config"],
+    queryFn: () => paymentsApi.config(),
+    staleTime: 60_000,
+  });
+  const isAdmin = useAuthStore((st) => (st.user as any)?.role === "admin");
+  const paymentsOff = Boolean(payCfg && !payCfg.configured) && !isAdmin;
 
   const [form, setForm] = useState({
     label: "Home",
@@ -137,6 +156,7 @@ export function CheckoutPage() {
             image_url: found.cover_url ?? null,
             unit_price: found.price,
             qty: 1,
+            digital: isDigitalBook(found as any),
           }
         : null;
     }
@@ -154,11 +174,17 @@ export function CheckoutPage() {
         image_url: i.product?.image_url ?? null,
         unit_price: i.unit_price,
         qty: i.qty,
+        digital: (i.product as any)?.fulfillment === "digital",
       }));
 
   const subtotal = lineItems.reduce((sum, i) => sum + i.unit_price * i.qty, 0);
+  // Only print books and physical gear need a courier + address. An e-book,
+  // PDF, course or test series is delivered inside the app, so no address, no
+  // COD and no shipping charge shows up for those baskets at all.
   const hasPhysical = lineItems.some(
-    (i) => i.item_type === "product" || i.item_type === "book",
+    (i) =>
+      (i.item_type === "product" && !(i as any).digital) ||
+      (i.item_type === "book" && !(i as any).digital),
   );
   const shippingFee = !hasPhysical ? 0 : subtotal >= 999 ? 0 : 49;
   const discount = appliedCoupon ? Math.round(subtotal * 0.1 * 100) / 100 : 0;
@@ -319,6 +345,23 @@ export function CheckoutPage() {
       <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_380px]">
         <div className="space-y-6">
           {/* ── Address ─────────────────────────────────────────── */}
+          {!hasPhysical && (
+            <section className="rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-6">
+              <h2 className="flex items-center gap-2 text-base font-bold text-foreground">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/15 text-xs font-bold text-emerald-600">
+                  1
+                </span>
+                Digital delivery
+              </h2>
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                Is order me sirf <strong className="text-foreground">e-book / PDF / test series</strong> hai —
+                courier, address ya delivery charge ki zaroorat nahi. Payment ke baad sab kuch turant
+                aapki library me add ho jayega.
+              </p>
+            </section>
+          )}
+
+          {hasPhysical && (
           <section className="rounded-2xl border bg-card p-6">
             <div className="flex items-center justify-between gap-3">
               <h2 className="flex items-center gap-2 text-base font-bold text-foreground">
@@ -481,18 +524,21 @@ export function CheckoutPage() {
               </form>
             )}
           </section>
+          )}
 
           {/* ── Payment ─────────────────────────────────────────── */}
           <section className="rounded-2xl border bg-card p-6">
             <h2 className="flex items-center gap-2 text-base font-bold text-foreground">
               <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-xs font-bold text-primary">
-                2
+                {hasPhysical ? 2 : 2}
               </span>
               Payment method
             </h2>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
-              {PAYMENT_METHODS.map((method) => {
+              {PAYMENT_METHODS.filter(
+                (m) => hasPhysical || m.value !== "cod",
+              ).map((method) => {
                 const Icon = method.icon;
                 const active = paymentMethod === method.value;
                 return (
@@ -528,13 +574,17 @@ export function CheckoutPage() {
 
             <label className="mt-5 block">
               <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                Delivery notes (optional)
+                {hasPhysical ? "Delivery notes (optional)" : "Notes (optional)"}
               </span>
               <textarea
                 rows={2}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Landmark, preferred delivery time…"
+                placeholder={
+                  hasPhysical
+                    ? "Landmark, preferred delivery time…"
+                    : "Kuch kehna ho to likh dein…"
+                }
                 className="mt-1.5 w-full rounded-lg border bg-card px-3 py-2 text-sm outline-none focus:border-primary/50"
               />
             </label>
@@ -635,7 +685,9 @@ export function CheckoutPage() {
                   </div>
                 )}
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Delivery</span>
+                  <span className="text-muted-foreground">
+                    {hasPhysical ? "Delivery" : "Delivery (digital)"}
+                  </span>
                   <span
                     className={
                       shippingFee === 0
@@ -643,9 +695,11 @@ export function CheckoutPage() {
                         : "font-semibold text-foreground"
                     }
                   >
-                    {shippingFee === 0
-                      ? "FREE"
-                      : `₹${shippingFee.toLocaleString("en-IN")}`}
+                    {!hasPhysical
+                      ? "Nahi lagegi"
+                      : shippingFee === 0
+                        ? "FREE"
+                        : `₹${shippingFee.toLocaleString("en-IN")}`}
                   </span>
                 </div>
                 <div className="flex justify-between border-t pt-3 text-base">
@@ -659,27 +713,51 @@ export function CheckoutPage() {
               <Button
                 className="mt-5 w-full"
                 size="lg"
-                disabled={placeOrder.isPending || (!address && !isDirect)}
+                disabled={
+                  placeOrder.isPending ||
+                  paymentsOff ||
+                  (hasPhysical && !address && !isDirect)
+                }
                 onClick={() => placeOrder.mutate()}
               >
-                {placeOrder.isPending ? "Placing order…" : `Pay ₹${total.toLocaleString("en-IN")}`}
+                {paymentsOff
+                  ? "Payments abhi band hain"
+                  : placeOrder.isPending
+                    ? "Placing order…"
+                    : `Pay ₹${total.toLocaleString("en-IN")}`}
               </Button>
 
-              {!address && !isDirect && (
+              {paymentsOff && (
+                <p className="mt-2 rounded-lg bg-amber-500/10 px-3 py-2 text-center text-[11px] font-medium leading-relaxed text-amber-700 dark:text-amber-400">
+                  Online payment abhi shuru nahi hua, isliye order band hai — paisa nahi katega.
+                  Shuru hote hi yahi button kaam karega.
+                </p>
+              )}
+
+              {hasPhysical && !address && !isDirect && (
                 <p className="mt-2 text-center text-xs text-muted-foreground">
                   Add a delivery address to continue
                 </p>
               )}
 
               <div className="mt-4 space-y-2 border-t pt-4 text-[11px] text-muted-foreground">
-                <div className="flex items-center gap-2">
-                  <Truck className="h-3.5 w-3.5 text-primary" />
-                  Dispatched within 24 hours
-                </div>
-                <div className="flex items-center gap-2">
-                  <Package className="h-3.5 w-3.5 text-primary" />
-                  7-day easy replacement on physical items
-                </div>
+                {hasPhysical ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <Truck className="h-3.5 w-3.5 text-primary" />
+                      Dispatched within 24 hours
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Package className="h-3.5 w-3.5 text-primary" />
+                      7-day easy replacement on physical items
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Package className="h-3.5 w-3.5 text-primary" />
+                    Digital — payment ke turant baad library me
+                  </div>
+                )}
               </div>
             </div>
           </div>

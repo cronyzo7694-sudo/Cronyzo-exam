@@ -5,6 +5,7 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { usePaymentsReady } from "@/hooks/usePaymentsReady";
 import {
   ArrowLeft,
   BadgeCheck,
@@ -59,6 +60,7 @@ export function BookDetailPage() {
    * a buyer a file (`code: "reading_only"`), because the only place an e-book
    * is allowed to live is this reader.
    */
+  const payments = usePaymentsReady(); // hook order must not depend on the query
   const [readerBusy, setReaderBusy] = useState<null | "full" | "sample">(null);
   const [readerOpen, setReaderOpen] = useState<null | "full" | "sample">(null);
   const [pdfNote, setPdfNote] = useState<string | null>(null);
@@ -157,7 +159,13 @@ export function BookDetailPage() {
     );
   }
 
-  const isDigital = book.format === "ebook" || book.format === "pdf";
+  // E-book / PDF editions never ship — no courier, no COD, no delivery fee.
+  const isDigital =
+    ["ebook", "e-book", "pdf", "digital"].includes(String(book.format || "").toLowerCase()) ||
+    (!["paperback", "hardcover", "hardbound", "printed"].includes(
+      String(book.format || "").toLowerCase(),
+    ) &&
+      Boolean(book.has_pdf));
 
   const specs = [
     { icon: Hash, label: "ISBN", value: book.isbn ?? "—" },
@@ -372,7 +380,7 @@ export function BookDetailPage() {
                     <Button
                       className="mt-5 w-full"
                       size="lg"
-                      disabled={!book.in_stock && !isDigital}
+                      disabled={(!book.in_stock && !isDigital) || !payments.ready}
                       onClick={() =>
                         navigate({
                           to: "/checkout",
@@ -381,7 +389,11 @@ export function BookDetailPage() {
                       }
                     >
                       <ShoppingCart className="mr-2 h-4 w-4" />
-                      {isDigital ? "Buy e-book" : "Buy now"}
+                      {!payments.ready
+                        ? "Payment jald shuru hoga"
+                        : isDigital
+                          ? "Buy e-book"
+                          : "Buy now"}
                     </Button>
                     {book.has_pdf && (
                       <Button
@@ -442,15 +454,24 @@ export function BookDetailPage() {
                       </span>
                     </div>
                   )}
-                  <div className="flex items-center gap-2.5">
-                    <Package className="h-4 w-4 shrink-0 text-primary" />
-                    <span className="text-muted-foreground">
-                      {Number(book.shipping_fee || 0) > 0
-                        ? `Delivery ₹${Number(book.shipping_fee)} · checkout par`
-                        : "Free delivery"}{" "}
-                      · COD available
-                    </span>
-                  </div>
+                  {isDigital ? (
+                    <div className="flex items-center gap-2.5">
+                      <Package className="h-4 w-4 shrink-0 text-primary" />
+                      <span className="text-muted-foreground">
+                        Delivery charge nahi · address ki bhi zaroorat nahi
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2.5">
+                      <Package className="h-4 w-4 shrink-0 text-primary" />
+                      <span className="text-muted-foreground">
+                        {Number(book.shipping_fee || 0) > 0
+                          ? `Delivery ₹${Number(book.shipping_fee)} · checkout par`
+                          : "Free delivery"}{" "}
+                        · COD available
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 

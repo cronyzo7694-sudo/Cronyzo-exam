@@ -15,6 +15,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { usePaymentsReady } from "@/hooks/usePaymentsReady";
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import {
   ArrowLeft,
@@ -56,6 +57,7 @@ const FILTERS: { key: Filter; label: string }[] = [
 
 export function ExamDetailPage() {
   const { examId } = useParams({ from: "/app/exams/$examId" });
+  const paymentsReady = usePaymentsReady();
   // Arriving from search (?series=12) pre-filters the card list to that test.
   const id = Number(examId);
   const navigate = useNavigate();
@@ -247,7 +249,7 @@ export function ExamDetailPage() {
       )}
 
       {/* ── Paid series: price, unlock state, and the buy button ───────── */}
-      {(exam.is_paid || paywall) && (
+      {(exam.is_paid || paywall) && !(exam as any).unlimited_access && (
         <section
           className={cn(
             "flex flex-wrap items-center justify-between gap-3 rounded-2xl border p-4",
@@ -258,29 +260,26 @@ export function ExamDetailPage() {
         >
           <div>
             <p className="text-[13px] font-bold">
-              {(exam as any).unlimited_access
-                ? "Admin access — sab kuch free"
-                : exam.purchased
-                  ? "Aapke paas ye series hai"
-                  : "Paid test series"}
+              {exam.purchased ? "Aapke paas ye series hai" : "Paid test series"}
             </p>
             <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-              {(exam as any).unlimited_access
-                ? "Aapke account par har book aur test free hai — kabhi payment nahi."
-                : exam.purchased
+              {exam.purchased
                 ? "Is series ke saare tests aapke liye khule hain."
                 : `Ek baar kharidein — series ke saare tests khul jayenge${
                     exam.price ? ` · ₹${exam.price}` : ""
                   }`}
             </p>
           </div>
-          {!exam.purchased && !(exam as any).unlimited_access && (
+          {!exam.purchased && (
             <button
               onClick={() => buySeries(paywall?.examId ?? exam.buy_exam_id ?? exam.id)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-[13px] font-bold text-primary-foreground"
+              disabled={!paymentsReady.ready}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-[13px] font-bold text-primary-foreground disabled:opacity-50"
             >
               <ShoppingCart className="h-4 w-4" />
-              {`Series kharidein${exam.price ? ` · ₹${exam.price}` : ""}`}
+              {paymentsReady.ready
+                ? `Series kharidein${exam.price ? ` · ₹${exam.price}` : ""}`
+                : "Payment jald shuru hoga"}
             </button>
           )}
         </section>

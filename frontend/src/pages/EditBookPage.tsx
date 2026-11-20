@@ -451,7 +451,10 @@ export function EditBookPage() {
                   <button
                     key={f.value}
                     type="button"
-                    onClick={() => set("format", f.value)}
+                    onClick={() => {
+                      set("format", f.value);
+                      if (["ebook", "pdf"].includes(f.value)) set("shipping_fee", "0");
+                    }}
                     className={cn(
                       "rounded-lg border px-3 py-1.5 text-[12.5px] font-semibold transition-colors",
                       form.format === f.value
@@ -483,27 +486,49 @@ export function EditBookPage() {
                   className={inputCls}
                 />
               </Field>
-              <Field label="Stock">
-                <input
-                  type="number"
-                  min={0}
-                  value={form.stock}
-                  onChange={(e) => set("stock", e.target.value)}
-                  className={inputCls}
-                />
-              </Field>
-              <Field label="Delivery charge (₹)">
-                <input
-                  type="number"
-                  min={0}
-                  value={form.shipping_fee}
-                  onChange={(e) => set("shipping_fee", e.target.value)}
-                  className={inputCls}
-                />
-                <p className="mt-1 text-[10.5px] text-muted-foreground">
-                  Printed copy bhejne ka courier charge — 0 matlab free delivery. PDF/e-book par lagu nahi hota.
-                </p>
-              </Field>
+              {["paperback", "hardcover"].includes(form.format) ? (
+                <Field label="Stock">
+                  <input
+                    type="number"
+                    min={0}
+                    value={form.stock}
+                    onChange={(e) => set("stock", e.target.value)}
+                    className={inputCls}
+                  />
+                </Field>
+              ) : (
+                <Field label="Stock">
+                  <div className="flex h-10 items-center rounded-lg border border-dashed px-3 text-[12px] font-semibold text-muted-foreground">
+                    Unlimited (digital)
+                  </div>
+                </Field>
+              )}
+              {/* A PDF/e-book never reaches a courier, so asking for a
+                  delivery charge there would only confuse the seller. */}
+              {["paperback", "hardcover"].includes(form.format) ? (
+                <Field label="Delivery charge (₹)">
+                  <input
+                    type="number"
+                    min={0}
+                    value={form.shipping_fee}
+                    onChange={(e) => set("shipping_fee", e.target.value)}
+                    className={inputCls}
+                  />
+                  <p className="mt-1 text-[10.5px] text-muted-foreground">
+                    Printed copy ka courier charge — 0 matlab free delivery.
+                  </p>
+                </Field>
+              ) : (
+                <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-3">
+                  <p className="text-[11.5px] font-bold text-emerald-700 dark:text-emerald-400">
+                    E-book / PDF hai — delivery nahi lagti
+                  </p>
+                  <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
+                    Koi courier, address ya COD nahi. Kharida hua reader turant Cronyzo par
+                    padh lega. Delivery charge aur stock ki zaroorat nahi.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </Section>
