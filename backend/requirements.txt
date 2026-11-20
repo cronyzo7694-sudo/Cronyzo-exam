@@ -38,6 +38,11 @@ packaging==24.1
 # stored, so covers load fast on a phone network.
 pillow==13.0.0
 
+# --- PDF rendering for the in-app reader --------------------------------
+# Pages are rasterised server-side so a paid e-book never reaches the
+# browser as a file (no download, no re-share — see services/book_reader.py).
+pymupdf==1.24.14
+
 # --- HTTP client (AI translate / explanation / answer derivation) ---
 requests==2.32.3
 

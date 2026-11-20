@@ -146,6 +146,14 @@ class Book(db.Model):
             "sold_count": self.sold_count,
             # Digital edition — the PDF itself is gated by the API, never here
             "has_pdf": bool(self.pdf_url),
+            # Only a real outside link is exposed; an internally stored file is
+            # referenced by has_pdf alone (it never leaves the server).
+            "pdf_url": (
+                self.pdf_url
+                if (self.pdf_url or "").startswith(("http://", "https://"))
+                else None
+            ),
+            "pdf_hosted": (self.pdf_url or "").startswith("cronyzo://file/"),
             "pdf_name": self.pdf_name,
             "pdf_size_bytes": int(self.pdf_size_bytes or 0),
             "has_preview": bool(self.preview_pdf_url),

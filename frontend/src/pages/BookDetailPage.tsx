@@ -21,6 +21,8 @@ import {
   Star,
   Truck,
 } from "lucide-react";
+
+import { ProtectedBookReader } from "../components/book/ProtectedBookReader";
 import { booksApi } from "@/lib/commerce";
 import { reviewsApi } from "@/lib/api";
 import { ReviewCard, ReviewForm, ReviewSummaryBar } from "@/components/reviews/Reviews";
@@ -43,15 +45,6 @@ export function BookDetailPage() {
     enabled: Boolean(book?.category),
   });
 
-  /**
-   * E-book actions.
-   *
-   * Free titles hand out the PDF immediately; paid titles ask the API, which
-   * answers 402 until an order is paid — the button then becomes "Buy to read".
-   */
-  const [pdfBusy, setPdfBusy] = useState(false);
-  const [pdfNote, setPdfNote] = useState<string | null>(null);
-
   /** Real reviews — the only thing that moves the stars on this page. */
   const reviewsQuery = useQuery({
     queryKey: ["book-reviews", book?.id],
@@ -59,15 +52,58 @@ export function BookDetailPage() {
     enabled: Boolean(book?.id),
   });
 
+  /**
+   * E-book actions — all of them go through the protected reader.
+   *
+   * There is no download path for a paid title any more: the API refuses even
+   * a buyer a file (`code: "reading_only"`), because the only place an e-book
+   * is allowed to live is this reader.
+   */
+  const [readerBusy, setReaderBusy] = useState<null | "full" | "sample">(null);
+  const [readerOpen, setReaderOpen] = useState<null | "full" | "sample">(null);
+  const [pdfNote, setPdfNote] = useState<string | null>(null);
+
+  const openReader = async (mode: "full" | "sample") => {
+    if (!book) return;
+    setReaderBusy(mode);
+    setPdfNote(null);
+    try {
+      const res = await booksApi.readerInfo(book.id);
+      const data = res.data;
+      if (data?.mode === "full" && mode === "full") {
+        setReaderOpen("full");
+        return;
+      }
+      if (data?.has_sample) {
+        setReaderOpen("sample");
+        if (mode === "full" && data.mode !== "full") {
+          setPdfNote(
+            data.code === "login_required"
+              ? "Poori e-book padhne ke liye sign in karein — sample khula hai."
+              : "Poori e-book kharidne ke baad hi khulegi — abhi free sample padh lein.",
+          );
+        }
+        return;
+      }
+      setPdfNote(
+        data?.code === "login_required"
+          ? "Padhne ke liye sign in karein."
+          : res.message || "Ye e-book is listing par available nahi hai.",
+      );
+    } catch (err: any) {
+      setPdfNote(err?.message || "Reader nahi khul paya");
+    } finally {
+      setReaderBusy(null);
+    }
+  };
+
+  /** Only a title the seller marked "free to download" still hands out a file. */
   const openDownload = async () => {
     if (!book) return;
-    setPdfBusy(true);
     setPdfNote(null);
     try {
       const res = await booksApi.downloadPdf(book.id);
       if (res.hosted) {
-        // Stored with us: fetch with the token so the file is genuinely gated,
-        // then hand the browser a document it can save.
         const blob = await booksApi.readBlob(book.id, "file");
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -81,60 +117,11 @@ export function BookDetailPage() {
         window.open(res.url, "_blank", "noopener,noreferrer");
       }
     } catch (err: any) {
-      if (err?.status === 402) {
-        setPdfNote("Buy this e-book to download the full PDF.");
-      } else {
-        setPdfNote(err?.message || "Could not open the download");
-      }
-    } finally {
-      setPdfBusy(false);
-    }
-  };
-
-  /** Read the full e-book in the browser (same gate as the download). */
-  const [readerBusy, setReaderBusy] = useState(false);
-  const readNow = async () => {
-    if (!book) return;
-    setReaderBusy(true);
-    setPdfNote(null);
-    try {
-      const blob = await booksApi.readBlob(book.id, "file");
-      const url = URL.createObjectURL(
-        new Blob([blob], { type: "application/pdf" }),
+      setPdfNote(
+        err?.code === "reading_only"
+          ? "Ye e-book sirf Cronyzo par padhi ja sakti hai — download band hai."
+          : err?.message || "Could not open the download",
       );
-      window.open(url, "_blank", "noopener,noreferrer");
-      setTimeout(() => URL.revokeObjectURL(url), 10 * 60_000);
-    } catch (err: any) {
-      if (err?.status === 402) {
-        setPdfNote("Buy this e-book to read the full PDF — the free sample stays open.");
-      } else {
-        setPdfNote(err?.message || "Could not open the reader");
-      }
-    } finally {
-      setReaderBusy(false);
-    }
-  };
-
-  const openPreview = async () => {
-    if (!book) return;
-    setPdfBusy(true);
-    setPdfNote(null);
-    try {
-      const res = await booksApi.preview(book.id);
-      if (/^https?:\/\//i.test(res.url)) {
-        window.open(res.url, "_blank", "noopener,noreferrer");
-        return;
-      }
-      const blob = await booksApi.readBlob(book.id, "preview");
-      const url = URL.createObjectURL(
-        new Blob([blob], { type: "application/pdf" }),
-      );
-      window.open(url, "_blank", "noopener,noreferrer");
-      setTimeout(() => URL.revokeObjectURL(url), 10 * 60_000);
-    } catch (err: any) {
-      setPdfNote(err?.message || "No free sample for this title");
-    } finally {
-      setPdfBusy(false);
     }
   };
 
@@ -359,57 +346,55 @@ export function BookDetailPage() {
                   )}
                 </div>
 
-                {/* Free e-book: no checkout at all */}
+                {/* Free e-book: read here, download only if the seller opted in */}
                 {book.is_free_download ? (
-                  <Button
-                    className="mt-5 w-full"
-                    size="lg"
-                    onClick={() => void openDownload()}
-                    disabled={pdfBusy}
-                  >
-                    <Download className="mr-2 h-4 w-4" />
-                    {pdfBusy ? "Opening…" : "Download free PDF"}
-                  </Button>
+                  <>
+                    <Button
+                      className="mt-5 w-full"
+                      size="lg"
+                      onClick={() => void openReader("full")}
+                      disabled={readerBusy !== null}
+                    >
+                      <BookOpen className="mr-2 h-4 w-4" />
+                      {readerBusy ? "Opening…" : "Read now — free"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="mt-2 w-full"
+                      onClick={() => void openDownload()}
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Download PDF (free)
+                    </Button>
+                  </>
                 ) : (
-                  <Button
-                    className="mt-5 w-full"
-                    size="lg"
-                    disabled={!book.in_stock && !isDigital}
-                    onClick={() =>
-                      navigate({
-                        to: "/checkout",
-                        search: { type: "book", id: String(book.id) },
-                      })
-                    }
-                  >
-                    <ShoppingCart className="mr-2 h-4 w-4" />
-                    {isDigital ? "Buy e-book" : "Buy now"}
-                  </Button>
-                )}
-
-                {/* Already bought? The download is right here. */}
-                {book.has_pdf && !book.is_free_download && (
-                  <Button
-                    variant="outline"
-                    className="mt-2 w-full"
-                    onClick={() => void openDownload()}
-                    disabled={pdfBusy}
-                  >
-                    <Download className="mr-2 h-4 w-4" />
-                    {pdfBusy ? "Checking…" : "Download PDF (if purchased)"}
-                  </Button>
-                )}
-
-                {/* Read it in place — free title, owner, admin or paid buyer */}
-                {book.has_pdf && (
-                  <Button
-                    className="mt-2 w-full"
-                    onClick={() => void readNow()}
-                    disabled={readerBusy}
-                  >
-                    <BookOpen className="mr-2 h-4 w-4" />
-                    {readerBusy ? "Opening…" : book.is_free_download ? "Read now — free" : "Read now (if purchased)"}
-                  </Button>
+                  <>
+                    <Button
+                      className="mt-5 w-full"
+                      size="lg"
+                      disabled={!book.in_stock && !isDigital}
+                      onClick={() =>
+                        navigate({
+                          to: "/checkout",
+                          search: { type: "book", id: String(book.id) },
+                        })
+                      }
+                    >
+                      <ShoppingCart className="mr-2 h-4 w-4" />
+                      {isDigital ? "Buy e-book" : "Buy now"}
+                    </Button>
+                    {book.has_pdf && (
+                      <Button
+                        variant="outline"
+                        className="mt-2 w-full"
+                        onClick={() => void openReader("full")}
+                        disabled={readerBusy !== null}
+                      >
+                        <BookOpen className="mr-2 h-4 w-4" />
+                        {readerBusy === "full" ? "Opening…" : "Read now (if purchased)"}
+                      </Button>
+                    )}
+                  </>
                 )}
 
                 {/* Free sample — the strongest thing on a book page */}
@@ -417,8 +402,8 @@ export function BookDetailPage() {
                   <Button
                     variant="ghost"
                     className="mt-2 w-full text-primary"
-                    onClick={() => void openPreview()}
-                    disabled={pdfBusy}
+                    onClick={() => void openReader("sample")}
+                    disabled={readerBusy !== null}
                   >
                     <FileText className="mr-2 h-4 w-4" />
                     Read a free sample
@@ -434,7 +419,7 @@ export function BookDetailPage() {
 
                 {book.is_free_download && (
                   <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-[11.5px] font-semibold text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
-                    This title is free to download — no purchase, no signup.
+                    Free title — yahan padh lein, chaahein to PDF download bhi kar lein.
                   </p>
                 )}
 
@@ -558,6 +543,23 @@ export function BookDetailPage() {
           </section>
         )}
       </div>
+
+      {readerOpen && (
+        <ProtectedBookReader
+          bookId={book.id}
+          sample={readerOpen === "sample"}
+          title={book.title}
+          onClose={() => setReaderOpen(null)}
+          onNeedsPurchase={() => {
+            if (book.is_free_download) {
+              setPdfNote("Padhne ke liye sign in karein.");
+              navigate({ to: "/login" });
+              return;
+            }
+            navigate({ to: "/checkout", search: { type: "book", id: String(book.id) } });
+          }}
+        />
+      )}
     </>
   );
 }

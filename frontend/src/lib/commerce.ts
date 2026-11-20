@@ -140,10 +140,14 @@ export type Book = {
   chapters?: BookChapter[];
   /* ── Digital edition ── */
   has_pdf?: boolean;
+  /** Outside link only — an uploaded file stays on the server. */
+  pdf_url?: string | null;
+  pdf_hosted?: boolean;
   pdf_name?: string | null;
   pdf_size_bytes?: number;
   has_preview?: boolean;
   preview_pdf_url?: string | null;
+  preview_hosted?: boolean;
   preview_pages?: number;
   is_free_download?: boolean;
   download_count?: number;
@@ -423,6 +427,43 @@ export const coursesApi = {
    Books
    ═══════════════════════════════════════════════════════════ */
 
+export type BookReaderInfo = {
+  mode: "full" | "sample" | "locked";
+  title: string;
+  slug: string;
+  cover?: string | null;
+  pages: number;
+  watermark: string;
+  price?: number;
+  has_pdf: boolean;
+  has_sample: boolean;
+  order_id?: number | null;
+  code?: string;
+  note?: string;
+  reading_only?: boolean;
+};
+
+/** Base URL used by the few calls that need raw fetch (bytes / images). */
+const rawBase = () =>
+  (import.meta.env.VITE_API_URL?.trim() || "/api").replace(/\/$/, "");
+
+async function blobRequest(path: string): Promise<Blob> {
+  const token = localStorage.getItem("access_token");
+  const res = await fetch(`${rawBase()}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const err = new Error(
+      (body && (body.error || body.message)) || "Could not load this page",
+    ) as Error & { status?: number; code?: string };
+    err.status = res.status;
+    err.code = body?.code;
+    throw err;
+  }
+  return res.blob();
+}
+
 export const booksApi = {
   list: (params?: Record<string, unknown>) =>
     api.get<Paged<Book>>(`/books${qs(params)}`),
@@ -434,6 +475,37 @@ export const booksApi = {
   update: (id: number, data: Record<string, unknown>) =>
     api.put<{ message: string; item: Book }>(`/books/${id}`, data),
   remove: (id: number) => api.delete<{ message: string }>(`/books/${id}`),
+
+  /* ── Protected reader ────────────────────────────────────────────────
+     The PDF never leaves the server: the API answers with page images that
+     carry the reader's own watermark. `readerInfo` does not throw on 401/402
+     because those answers still describe what the reader may show. */
+  readerInfo: async (
+    bookId: number,
+  ): Promise<{ status: number; data: BookReaderInfo | null; message?: string }> => {
+    const token = localStorage.getItem("access_token");
+    const res = await fetch(`${rawBase()}/books/${bookId}/reader`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    const data = (await res.json().catch(() => null)) as (BookReaderInfo & { error?: string }) | null;
+    return {
+      status: res.status,
+      data: data && data.mode ? data : null,
+      message: data?.error,
+    };
+  },
+  /** One page as a watermarked JPEG. Needs a signed-in session. */
+  pageImage: (
+    bookId: number,
+    page: number,
+    opts?: { sample?: boolean; dpi?: number },
+  ) => {
+    const params = new URLSearchParams();
+    if (opts?.sample) params.set("sample", "1");
+    if (opts?.dpi) params.set("dpi", String(opts.dpi));
+    const q = params.toString();
+    return blobRequest(`/books/${bookId}/pages/${page}${q ? `?${q}` : ""}`);
+  },
 
   /* ── Digital edition ──────────────────────────────────────────────────
      The PDF itself is never in the public payload: the API hands out a
@@ -449,6 +521,12 @@ export const booksApi = {
     if (opts?.price !== undefined) form.append("price", String(opts.price));
     return api.post<{ message: string; item: Book }>(`/books/${bookId}/pdf`, form);
   },
+  /** Rebuild the free sample out of the full PDF (first N pages). */
+  rebuildSample: (bookId: number, pages?: number) =>
+    api.post<{ message: string; pages: number; item: Book }>(
+      `/books/${bookId}/sample/auto`,
+      pages ? { pages } : {},
+    ),
   uploadPreviewPdf: (bookId: number, file: File) => {
     const form = new FormData();
     form.append("file", file);
@@ -466,24 +544,10 @@ export const booksApi = {
    *
    * ``kind: "preview"`` is the free sample and needs no purchase at all.
    */
-  readBlob: async (bookId: number, kind: "file" | "preview") => {
-    const base = (import.meta.env.VITE_API_URL?.trim() || "/api").replace(/\/$/, "");
-    const path = kind === "preview" ? `/books/${bookId}/preview/file` : `/books/${bookId}/file`;
-    const token = localStorage.getItem("access_token");
-    const res = await fetch(`${base}${path}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      const err = new Error(
-        (body && (body.error || body.message)) || "Could not open this PDF",
-      ) as Error & { status?: number; code?: string };
-      err.status = res.status;
-      err.code = body?.code;
-      throw err;
-    }
-    return res.blob();
-  },
+  readBlob: (bookId: number, kind: "file" | "preview") =>
+    blobRequest(
+      kind === "preview" ? `/books/${bookId}/preview/file` : `/books/${bookId}/file`,
+    ),
 
   /** Returns a download URL, or 402 when the e-book has not been bought. */
   downloadPdf: (bookId: number) =>
@@ -496,9 +560,9 @@ export const booksApi = {
       /** true when Cronyzo stores the file itself (gated byte route) */
       hosted: boolean;
     }>(`/books/${bookId}/download`),
-  /** Free sample — public, no account needed. */
+  /** Free sample metadata — the sample itself opens in the protected reader. */
   preview: (bookId: number) =>
-    api.get<{ url: string; pages: number; title: string }>(
+    api.get<{ pages: number; title: string; reading_only: boolean; reader: string }>(
       `/books/${bookId}/preview`,
     ),
 };

@@ -112,6 +112,8 @@ type Form = {
   file_url: string;
   preview_mode: "link" | "upload";
   preview_url: string;
+  /** how many pages the auto sample should contain */
+  preview_pages: string;
   is_free_download: boolean;
 };
 
@@ -136,6 +138,7 @@ const EMPTY: Form = {
   file_url: "",
   preview_mode: "upload",
   preview_url: "",
+  preview_pages: "20",
   is_free_download: false,
 };
 
@@ -161,6 +164,7 @@ export function EditBookPage() {
   const sampleRef = useRef<HTMLInputElement | null>(null);
   const [pdfPicked, setPdfPicked] = useState<string | null>(null);
   const [samplePicked, setSamplePicked] = useState<string | null>(null);
+  const [sampleBusy, setSampleBusy] = useState(false);
 
   const currentPdf = useMemo(
     () => ({ has: Boolean(book?.has_pdf), name: book?.pdf_name as string | undefined, size: Number(book?.pdf_size_bytes || 0) }),
@@ -190,10 +194,13 @@ export function EditBookPage() {
       description: book.description ?? "",
       highlights: Array.isArray(book.highlights) ? book.highlights.join("\n") : (book.highlights ?? ""),
       is_digital: Boolean(book.has_pdf) || ["ebook", "pdf"].includes((book.format ?? "").toLowerCase()),
-      file_mode: "upload",
-      file_url: "",
-      preview_mode: "upload",
-      preview_url: "",
+      // A link the seller already saved must show up again — otherwise saving
+      // the form silently wiped the field.
+      file_mode: book.pdf_url ? "link" : "upload",
+      file_url: book.pdf_url ?? "",
+      preview_mode: book.preview_pdf_url ? "link" : "upload",
+      preview_url: book.preview_pdf_url ?? "",
+      preview_pages: String(book.preview_pages || 20),
       is_free_download: Boolean(book.is_free_download),
     });
     setReady(true);
@@ -201,6 +208,41 @@ export function EditBookPage() {
 
   const set = <K extends keyof Form>(key: K, value: Form[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
+
+  const makeSample = async () => {
+    if (!bookId) return;
+    setError(null);
+    setSaved(null);
+    setSampleBusy(true);
+    try {
+      const pages = Math.max(1, Number(form.preview_pages || 20));
+      const res = await booksApi.rebuildSample(bookId, pages);
+      await detail.refetch();
+      await queryClient.invalidateQueries({ queryKey: ["book", "detail"] });
+      setSaved(res?.message || `Sample ke ${pages} pages ban gaye.`);
+    } catch (err: any) {
+      setError(err?.message || "Sample nahi ban paya.");
+    } finally {
+      setSampleBusy(false);
+    }
+  };
+
+  const removeSample = async () => {
+    if (!bookId) return;
+    setError(null);
+    setSaved(null);
+    setSampleBusy(true);
+    try {
+      await booksApi.update(bookId, { preview_url: "", preview_pages: 0 });
+      await detail.refetch();
+      await queryClient.invalidateQueries({ queryKey: ["book", "detail"] });
+      setSaved("Sample hata diya.");
+    } catch (err: any) {
+      setError(err?.message || "Sample nahi hata paya.");
+    } finally {
+      setSampleBusy(false);
+    }
+  };
 
   const handleSave = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -230,13 +272,14 @@ export function EditBookPage() {
         description: form.description,
         highlights: form.highlights,
         is_free_download: form.is_free_download,
-        preview_pages: Number(book?.preview_pages || 0),
+        preview_pages: Number(form.preview_pages || 0),
       };
       // A pasted link only travels when the seller actually chose "link".
       if (form.is_digital && form.file_mode === "link" && form.file_url.trim()) {
         payload.file_url = form.file_url.trim();
       }
-      if (form.is_digital && form.preview_mode === "link" && form.preview_url.trim()) {
+      if (form.is_digital && form.preview_mode === "link") {
+        // empty string = "sample hata do"; a URL = "ye naya sample use karo"
         payload.preview_url = form.preview_url.trim();
       }
       await booksApi.update(bookId, payload);
@@ -261,8 +304,7 @@ export function EditBookPage() {
       setSamplePicked(null);
       if (pdfRef.current) pdfRef.current.value = "";
       if (sampleRef.current) sampleRef.current.value = "";
-      set("file_url", "");
-      set("preview_url", "");
+      void detail.refetch();
       setSaved("Book update ho gayi — library me turant nayi details dikhegi.");
     } catch (err: any) {
       setError(err?.message || "Save nahi ho paya — dobara try karo.");
@@ -574,14 +616,65 @@ export function EditBookPage() {
 
               <div className="rounded-xl border bg-card p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-[12.5px] font-bold">Free sample PDF (optional)</p>
+                  <p className="text-[12.5px] font-bold">Free sample PDF</p>
                   <span className="text-[11px] font-semibold text-muted-foreground">
-                    {currentSample.has ? "sample attached" : "abhi nahi"}
+                    {currentSample.has
+                      ? `${book?.preview_pages || 0} pages · ${currentSample.hosted ? "Cronyzo par" : "link se"}`
+                      : "abhi nahi"}
                   </span>
                 </div>
                 <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                  Watermarked extract jo koi bhi padh sakta hai — book page par sabse zyada bikri
-                  isi se hoti hai.
+                  Bachche pehle sample padhte hain — isi se book bikti hai. Poori PDF upload karne
+                  par sample <b>apne aap</b> ban jaata hai (shuru ke {form.preview_pages || "20"} pages).
+                </p>
+
+                {/* auto sample from the book itself */}
+                <div className="mt-2 rounded-lg border border-primary/25 bg-primary/5 p-2.5">
+                  <div className="flex items-end gap-2">
+                    <label className="flex-1">
+                      <span className="text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">
+                        Sample me kitne page
+                      </span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={80}
+                        inputMode="numeric"
+                        value={form.preview_pages}
+                        onChange={(e) => set("preview_pages", e.target.value)}
+                        className={cn(inputCls, "mt-1")}
+                      />
+                    </label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-[38px] shrink-0"
+                      onClick={() => void makeSample()}
+                      disabled={sampleBusy || !currentPdf.has}
+                      title={currentPdf.has ? "Poori PDF se sample banao" : "Pehle poori PDF add karein"}
+                    >
+                      {sampleBusy ? "Ban raha…" : currentSample.has ? "Sample dobara banao" : "Auto sample banao"}
+                    </Button>
+                  </div>
+                  {!currentPdf.has && (
+                    <p className="mt-1.5 text-[10.5px] font-semibold text-amber-600">
+                      Auto sample ke liye pehle poori book ki PDF upload karein ya link dein.
+                    </p>
+                  )}
+                  {currentSample.has && (
+                    <button
+                      type="button"
+                      onClick={() => void removeSample()}
+                      disabled={sampleBusy}
+                      className="mt-2 inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-destructive hover:underline"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Sample hatao
+                    </button>
+                  )}
+                </div>
+
+                <p className="mt-3 text-[11px] font-semibold text-muted-foreground">
+                  Ya apna sample khud dein (link / upload)
                 </p>
 
                 <div className="mt-2 flex gap-2">
@@ -604,12 +697,23 @@ export function EditBookPage() {
                 </div>
 
                 {form.preview_mode === "link" ? (
-                  <input
-                    value={form.preview_url}
-                    onChange={(e) => set("preview_url", e.target.value)}
-                    placeholder={currentSample.link || "https://… sample.pdf"}
-                    className={cn(inputCls, "mt-2")}
-                  />
+                  <div className="mt-2">
+                    <input
+                      value={form.preview_url}
+                      onChange={(e) => set("preview_url", e.target.value)}
+                      placeholder={
+                        currentSample.link || "https://drive.google.com/file/d/… sample"
+                      }
+                      className={inputCls}
+                    />
+                    <p className="mt-1 text-[10.5px] text-muted-foreground">
+                      {form.preview_url.trim()
+                        ? "Save karte hi ye link sample ban jayega."
+                        : currentSample.has
+                          ? "Khaali chhodne par sample hata diya jayega."
+                          : "Google Drive / Dropbox / koi bhi public PDF link chalega."}
+                    </p>
+                  </div>
                 ) : (
                   <div className="mt-2">
                     <input

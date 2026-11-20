@@ -399,13 +399,17 @@ def update_book(book_id):
             # removed file is stored as 0 rather than null.
             book.pdf_size_bytes = 0
             book.pdf_name = None
+    sample_touched = False
     if any(key in data for key in ("preview_url", "preview_pdf_url")):
         raw = data.get("preview_url", data.get("preview_pdf_url"))
         url = _normalise_file_url(raw)
         if url:
             book.preview_pdf_url = url
+            sample_touched = True
         elif not str(raw or "").strip():
             book.preview_pdf_url = None
+            book.preview_pages = 0
+            sample_touched = True
     if "preview_pages" in data:
         book.preview_pages = max(0, _safe_int(data.get("preview_pages"), book.preview_pages))
     if "is_free_download" in data:
@@ -426,7 +430,24 @@ def update_book(book_id):
         logger.exception("update_book id=%s failed", book_id)
         return jsonify({"error": "Could not update book"}), 500
 
-    return jsonify({"message": "Book updated", "item": book.to_dict()})
+    # A book with a PDF but no sample now grows one on its own (first N pages),
+    # unless the seller is deliberately managing the sample by hand.
+    note = None
+    if book.pdf_url and not book.preview_pdf_url and not sample_touched:
+        try:
+            from app.services import book_reader
+
+            pages, error = book_reader.auto_sample(book)
+            if pages:
+                note = f"Sample ke {pages} pages auto ban gaye."
+            elif error:
+                note = f"Sample auto nahi bana: {error}"
+        except Exception:  # noqa: BLE001
+            logger.exception("auto sample on update failed book=%s", book_id)
+
+    return jsonify(
+        {"message": ("Book updated. " + note).strip() if note else "Book updated", "item": book.to_dict()}
+    )
 
 
 @books_bp.delete("/<int:book_id>")
@@ -569,9 +590,28 @@ def upload_book_pdf(book_id: int):
         book.price = max(0.0, _safe_float(body.get("price"), book.price))
 
     db.session.commit()
+
+    # The sample makes itself: first N pages of the book, no second upload.
+    sample_note = None
+    try:
+        from app.services import book_reader
+
+        wanted = request.form.get("sample_pages") or _json_body().get("sample_pages")
+        pages, sample_error = book_reader.auto_sample(
+            book, pages=int(wanted) if wanted else None
+        )
+        if pages:
+            sample_note = f" Sample ke {pages} pages apne aap ban gaye."
+        elif sample_error and sample_error != "no_file":
+            logger.info("auto sample skipped book=%s: %s", book.id, sample_error)
+    except Exception:  # noqa: BLE001
+        logger.exception("auto sample failed book=%s", book.id)
+
     return jsonify(
         {
-            "message": "PDF attached" + (" — free to download" if book.is_free_download else ""),
+            "message": "PDF attached"
+            + (" — free to download" if book.is_free_download else "")
+            + (sample_note or ""),
             "item": book.to_dict(),
         }
     ), 201
@@ -655,12 +695,27 @@ def download_book_pdf(book_id: int):
         return (
             jsonify(
                 {
-                    "error": "Purchase this e-book to download the PDF",
+                    "error": "Purchase this e-book to read it",
                     "code": "payment_required",
                     "preview_available": bool(book.preview_pdf_url),
                 }
             ),
             402,
+        )
+
+    # Even a buyer does not get the file: paid e-books are read-only inside
+    # Cronyzo (no download, no link, no re-share). Only a title the seller
+    # explicitly marked "free to download" hands out the PDF.
+    if not book.is_free_download and (getattr(user, "role", "") or "") != "admin":
+        return (
+            jsonify(
+                {
+                    "error": "Ye e-book sirf Cronyzo par padhi ja sakti hai — download nahi hoti.",
+                    "code": "reading_only",
+                    "reader": f"/api/books/{book.id}/reader",
+                }
+            ),
+            403,
         )
 
     book.download_count = int(book.download_count or 0) + 1
@@ -702,17 +757,13 @@ def preview_book_pdf(book_id: int):
     if not book.preview_pdf_url:
         return jsonify({"error": "No free sample for this title", "code": "no_preview"}), 404
 
-    from app.services.documents import file_id_from_url
-
-    url = book.preview_pdf_url
-    if file_id_from_url(url):
-        url = f"/api/books/{book.id}/preview/file"
-
     return jsonify(
         {
-            "url": url,
             "pages": int(book.preview_pages or 0),
             "title": book.title,
+            "reading_only": True,
+            "reader": f"/api/books/{book.id}/reader",
+            "note": "Sample bhi sirf Cronyzo reader me khulta hai.",
         }
     )
 
@@ -760,6 +811,17 @@ def book_pdf_bytes(book_id: int):
             jsonify({"error": "Purchase this e-book to read it", "code": "payment_required"}),
             402,
         )
+    if not book.is_free_download and (getattr(user, "role", "") or "") != "admin":
+        return (
+            jsonify(
+                {
+                    "error": "Ye e-book sirf Cronyzo par padhi ja sakti hai — download nahi hoti.",
+                    "code": "reading_only",
+                    "reader": f"/api/books/{book.id}/reader",
+                }
+            ),
+            403,
+        )
 
     stored = load_pdf(stored_id)
     if stored is None:
@@ -793,7 +855,215 @@ def book_preview_bytes(book_id: int):
     if stored is None:
         return jsonify({"error": "The sample file is missing"}), 404
 
+    user = get_current_user()
+    if user is None or (user.role or "") != "admin":
+        return (
+            jsonify(
+                {
+                    "error": "Sample sirf Cronyzo reader me padha ja sakta hai",
+                    "code": "reading_only",
+                    "reader": f"/api/books/{book.id}/reader",
+                }
+            ),
+            403,
+        )
+
     resp = Response(stored.data, mimetype="application/pdf")
-    resp.headers["Cache-Control"] = "public, max-age=3600"
+    resp.headers["Cache-Control"] = "private, no-store"
     resp.headers["Content-Disposition"] = f'inline; filename="{(stored.filename or "sample.pdf").replace(chr(34), "")}"'
     return resp
+
+
+# ── Protected in-app reader ────────────────────────────────────────────────
+#
+# A paid e-book is never handed out as a file.  These two routes render the
+# PDF page by page into watermarked JPEGs, so the document stays on the server
+# and the reader only ever holds images of the page they are on.
+
+
+def _purchase_order_id(book_id: int, user) -> Optional[int]:
+    from app.models.order import Order, OrderItem
+
+    if user is None:
+        return None
+    row = (
+        db.session.query(Order.id)
+        .join(OrderItem, OrderItem.order_id == Order.id)
+        .filter(
+            OrderItem.item_type == "book",
+            OrderItem.item_id == book_id,
+            Order.user_id == user.id,
+            Order.status.in_(("paid", "completed", "shipped", "delivered")),
+        )
+        .first()
+    )
+    return int(row[0]) if row else None
+
+
+def _reader_identity(user) -> str:
+    if user is None:
+        return "Cronyzo sample"
+    name = (user.email or user.full_name or f"user {user.id}").strip()
+    phone = str(getattr(user, "phone", "") or "").strip()
+    tail = phone[-4:] if len(phone) >= 4 else ""
+    return f"{name}{' · ' + tail if tail else ''} · Cronyzo"
+
+
+@books_bp.get("/<int:book_id>/reader")
+def book_reader_info(book_id: int):
+    """What this caller is allowed to read, and how many pages exist."""
+    book = db.session.get(Book, book_id)
+    if book is None or not book.is_active:
+        return jsonify({"error": "Book not found"}), 404
+
+    from app.services import book_reader
+
+    user = get_current_user()
+    is_owner = user is not None and (
+        (user.role or "") == "admin" or int(book.seller_id) == int(user.id)
+    )
+    order_id = _purchase_order_id(book.id, user)
+    unlocked = bool(book.is_free_download) or float(book.price or 0) <= 0
+    allowed = bool(is_owner or unlocked or order_id)
+
+    payload: Dict[str, Any] = {
+        "title": book.title,
+        "slug": book.slug,
+        "cover": book.cover_url,
+        "has_pdf": bool(book.pdf_url),
+        "has_sample": bool(book.preview_pdf_url),
+        "price": float(book.price or 0),
+        "reading_only": True,
+        "note": "Ye e-book sirf Cronyzo par padhi ja sakti hai — download ya share nahi hoti.",
+    }
+
+    if book.pdf_url and allowed and user is not None:
+        stored_id, error = book_reader.ensure_stored(book)
+        if error:
+            return jsonify({"error": error, "code": "file_unavailable"}), 409
+        pages = book_reader.page_count(stored_id)
+        if pages <= 0:
+            return jsonify({"error": "Is PDF ki pages nahi khul payi", "code": "file_unavailable"}), 409
+        payload.update(
+            {
+                "mode": "full",
+                "pages": pages,
+                "watermark": _reader_identity(user),
+                "order_id": order_id,
+            }
+        )
+        return jsonify(payload)
+
+    if book.pdf_url and allowed and user is None:
+        payload.update({"mode": "locked", "code": "login_required"})
+        return jsonify(payload), 401
+
+    if book.preview_pdf_url:
+        stored_id, error = book_reader.ensure_stored(book, sample=True)
+        if error:
+            return jsonify({"error": error, "code": "file_unavailable"}), 409
+        pages = book_reader.page_count(stored_id)
+        limit = int(book.preview_pages or 0) or min(pages, 10)
+        payload.update(
+            {
+                "mode": "sample",
+                "pages": min(pages, limit),
+                "watermark": _reader_identity(user),
+                "code": "payment_required",
+            }
+        )
+        return jsonify(payload), 200
+
+    payload.update({"mode": "locked", "code": "payment_required"})
+    return jsonify(payload), 402
+
+
+@books_bp.get("/<int:book_id>/pages/<int:page_no>")
+def book_reader_page(book_id: int, page_no: int):
+    """One rendered page, watermarked with the reader's identity."""
+    from flask import Response
+
+    from app.services import book_reader
+
+    book = db.session.get(Book, book_id)
+    if book is None or not book.is_active:
+        return jsonify({"error": "Book not found"}), 404
+
+    sample = request.args.get("sample") in ("1", "true", "yes")
+    if not sample:
+        user = get_current_user()
+        if user is None:
+            return jsonify({"error": "Sign in to read this e-book", "code": "login_required"}), 401
+        is_owner = (user.role or "") == "admin" or int(book.seller_id) == int(user.id)
+        unlocked = bool(book.is_free_download) or float(book.price or 0) <= 0
+        if not (is_owner or unlocked or _purchase_order_id(book.id, user)):
+            return jsonify({"error": "Purchase this e-book to read it", "code": "payment_required"}), 402
+    else:
+        user = get_current_user()
+        if not book.preview_pdf_url:
+            return jsonify({"error": "No free sample for this title", "code": "no_preview"}), 404
+        limit = int(book.preview_pages or 0)
+        if limit and page_no > limit:
+            return jsonify({"error": "Sample khatam — poora padhne ke liye kharidein", "code": "sample_over"}), 403
+
+    stored_id, error = book_reader.ensure_stored(book, sample=sample)
+    if error:
+        return jsonify({"error": error, "code": "file_unavailable"}), 409
+
+    try:
+        dpi = int(request.args.get("dpi") or book_reader.DEFAULT_DPI)
+    except (TypeError, ValueError):
+        dpi = book_reader.DEFAULT_DPI
+
+    jpeg = book_reader.render_page(stored_id, page_no, dpi=dpi)
+    if jpeg is None:
+        return jsonify({"error": "Page not available", "code": "page_missing"}), 404
+
+    jpeg = book_reader.watermark(
+        jpeg,
+        _reader_identity(user),
+        footer="Cronyzo · sirf app me padhne ke liye · screenshot leak trackable hai",
+    )
+
+    resp = Response(jpeg, mimetype="image/jpeg")
+    resp.headers["Cache-Control"] = "private, no-store, max-age=0"
+    resp.headers["X-Robots-Tag"] = "noindex, noimageindex"
+    resp.headers["Content-Disposition"] = "inline"
+    return resp
+
+
+@books_bp.post("/<int:book_id>/sample/auto")
+@roles_required("teacher", "seller", "admin")
+def rebuild_sample(book_id: int):
+    """(Re)build the free sample from the full PDF — first N pages."""
+    book = db.session.get(Book, book_id)
+    if book is None or not book.is_active:
+        return jsonify({"error": "Book not found"}), 404
+
+    user = get_current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required"}), 401
+    if (user.role or "") != "admin" and int(book.seller_id) != int(user.id):
+        return jsonify({"error": "You can only change your own listing"}), 403
+    if not book.pdf_url:
+        return jsonify({"error": "Pehle poori book ki PDF add karein", "code": "no_pdf"}), 400
+
+    body = _json_body()
+    try:
+        pages = int(body.get("pages") or request.args.get("pages") or 0) or None
+    except (TypeError, ValueError):
+        pages = None
+
+    from app.services import book_reader
+
+    count, error = book_reader.auto_sample(book, pages=pages, force=True)
+    if error:
+        return jsonify({"error": error, "code": "sample_failed"}), 400
+
+    return jsonify(
+        {
+            "message": f"Sample ke {count} pages ban gaye",
+            "pages": count,
+            "item": book.to_dict(),
+        }
+    ), 201
