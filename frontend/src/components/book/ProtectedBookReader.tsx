@@ -68,7 +68,10 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
   const cache = useRef<Map<number, string>>(new Map());
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const hideTimer = useRef<number | null>(null);
-  const touchX = useRef<number | null>(null);
+  /** gesture bookkeeping — page turns must be deliberate, never accidental */
+  const gesture = useRef<{ x: number; y: number; t: number } | null>(null);
+  const lastScroll = useRef(0);
+  const [turnChip, setTurnChip] = useState<string | null>(null);
 
   /* ── 1. what may this caller read? ─────────────────────────────────── */
   useEffect(() => {
@@ -167,6 +170,15 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
   }, []);
 
   useEffect(() => {
+    if (status !== "ready") return;
+    if (!localStorage.getItem("cz_reader_hint")) {
+      localStorage.setItem("cz_reader_hint", "1");
+      setFlash("Page badalne ke liye side ke ⬅➡ arrows dabayein ya swipe karein");
+      window.setTimeout(() => setFlash(null), 4200);
+    }
+  }, [status]);
+
+  useEffect(() => {
     if (status === "ready") revealChrome();
     return () => {
       if (hideTimer.current) window.clearTimeout(hideTimer.current);
@@ -188,6 +200,24 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
       revealChrome();
     },
     [total, revealChrome],
+  );
+
+  const flashTurn = useCallback((label: string) => {
+    setTurnChip(label);
+    window.setTimeout(() => setTurnChip(null), 1100);
+  }, []);
+
+  /** the only way a page changes from a gesture — never from a stray tap */
+  const turn = useCallback(
+    (delta: number) => {
+      setPage((prev) => {
+        const next = Math.min(total, Math.max(1, prev + delta));
+        if (next !== prev) flashTurn(`Page ${next} / ${total}`);
+        return next === prev ? prev : next;
+      });
+      revealChrome();
+    },
+    [total, revealChrome, flashTurn],
   );
 
   const toggleFullscreen = async () => {
@@ -227,8 +257,14 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
       if (e.key === "PrintScreen") {
         warn("Screenshot par aapki ID chhapi hui hai — leak trackable hai.");
       }
-      if (e.key === "ArrowRight") go(page + 1);
-      if (e.key === "ArrowLeft") go(page - 1);
+      if (e.key === "ArrowRight" || e.key === "PageDown") {
+        e.preventDefault();
+        turn(1);
+      }
+      if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault();
+        turn(-1);
+      }
       if (e.key === "Home") go(1);
       if (e.key === "End") go(total);
       if (e.key === "Escape" && !document.fullscreenElement) onClose();
@@ -283,31 +319,53 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
       });
       document.body.style.overflow = prevOverflow;
     };
-  }, [page, total, onClose, warn, go]);
+  }, [page, total, onClose, warn, go, turn]);
 
-  /* ── 5. touch: tap left/right to turn, swipe, middle tap toggles ──── */
-  const onTouchStart = (e: React.TouchEvent) => {
-    touchX.current = e.touches[0]?.clientX ?? null;
+  /* ── 5. gestures — deliberately conservative (archive.org style) ────
+     A page only turns when the reader *means* it:
+       • the edge arrow buttons (always visible, out of the text),
+       • a long, mostly-horizontal swipe (≥70px and clearly sideways),
+       • the arrow keys, or the page field / slider.
+     A plain tap never turns a page — it only shows/hides the controls — and a
+     tap right after scrolling is ignored, so reading down a tall page cannot
+     flip it by accident. */
+  const onScroll = () => {
+    lastScroll.current = Date.now();
   };
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    if (!touch) return;
+    gesture.current = { x: touch.clientX, y: touch.clientY, t: Date.now() };
+  };
+
   const onTouchEnd = (e: React.TouchEvent) => {
-    const start = touchX.current;
-    touchX.current = null;
-    if (start == null) return;
-    const dx = (e.changedTouches[0]?.clientX ?? start) - start;
-    if (Math.abs(dx) > 55) {
-      go(page + (dx < 0 ? 1 : -1));
-    } else {
+    const start = gesture.current;
+    gesture.current = null;
+    const touch = e.changedTouches[0];
+    if (!start || !touch) return;
+
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    const dt = Date.now() - start.t;
+    const horizontal = Math.abs(dx) >= 70 && Math.abs(dx) > Math.abs(dy) * 1.8;
+    const quick = dt < 900;
+
+    if (horizontal && quick) {
+      turn(dx < 0 ? 1 : -1);
+      return;
+    }
+    // a tap (no real movement) only toggles the bars — and never counts as a
+    // tap if the page was being scrolled a moment ago
+    const still = Math.abs(dx) < 12 && Math.abs(dy) < 12;
+    if (still && Date.now() - lastScroll.current > 350) {
       setChrome((c) => !c);
     }
   };
 
-  /** tap zones for mouse + phone taps that do not turn into a drag */
-  const onSurfaceClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    if (x < rect.width * 0.3) go(page - 1);
-    else if (x > rect.width * 0.7) go(page + 1);
-    else setChrome((c) => !c);
+  /** mouse click on the paper behaves like a tap: controls only, no paging */
+  const onSurfaceClick = () => {
+    if (Date.now() - lastScroll.current > 350) setChrome((c) => !c);
   };
 
   const currentUrl = cache.current.get(page);
@@ -375,6 +433,8 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
         onClick={onSurfaceClick}
+        onScroll={onScroll}
+        style={{ touchAction: "pan-y" }}
       >
         <div
           className={`mx-auto flex min-h-full w-full items-start justify-center px-2 py-2 transition-all duration-200 ${
@@ -454,10 +514,37 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
         )}
       </div>
 
+      {/* ── edge arrows: the deliberate way to turn a page ────────────── */}
+      <button
+        onClick={() => turn(-1)}
+        disabled={page <= 1}
+        className={`absolute left-0 top-1/2 z-20 grid h-24 w-9 -translate-y-1/2 place-items-center rounded-r-xl border-y border-r backdrop-blur transition-all duration-300 disabled:pointer-events-none disabled:opacity-0 ${
+          theme === "cream"
+            ? "border-[#2e2a24]/10 bg-[#f6efe1]/55 text-[#2e2a24]/70"
+            : "border-white/10 bg-black/35 text-white/70"
+        } ${chrome ? "opacity-100" : "opacity-30 hover:opacity-80"}`}
+        aria-label="Pichla page"
+      >
+        <ChevronLeft className="h-5 w-5" />
+      </button>
+      <button
+        onClick={() => turn(1)}
+        disabled={page >= total}
+        className={`absolute right-0 top-1/2 z-20 grid h-24 w-9 -translate-y-1/2 place-items-center rounded-l-xl border-y border-l backdrop-blur transition-all duration-300 disabled:pointer-events-none disabled:opacity-0 ${
+          theme === "cream"
+            ? "border-[#2e2a24]/10 bg-[#f6efe1]/55 text-[#2e2a24]/70"
+            : "border-white/10 bg-black/35 text-white/70"
+        } ${chrome ? "opacity-100" : "opacity-30 hover:opacity-80"}`}
+        aria-label="Agla page"
+      >
+        <ChevronRight className="h-5 w-5" />
+      </button>
+
+      {/* the eye moves down so it never sits under the right arrow */}
       {/* ── floating show/hide control (always reachable) ─────────────── */}
       <button
         onClick={() => setChrome((c) => !c)}
-        className={`absolute right-2 top-1/2 z-30 grid h-10 w-7 -translate-y-1/2 place-items-center rounded-full border backdrop-blur transition-all duration-300 ${
+        className={`absolute bottom-24 right-2 z-30 grid h-9 w-9 place-items-center rounded-full border backdrop-blur transition-all duration-300 ${
           theme === "cream"
             ? "border-[#2e2a24]/15 bg-[#f6efe1]/70 text-[#2e2a24]"
             : "border-white/15 bg-black/45 text-white"
@@ -506,7 +593,7 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
             <ChevronsLeft className="h-4 w-4" />
           </button>
           <button
-            onClick={() => go(page - 1)}
+            onClick={() => turn(-1)}
             disabled={page <= 1}
             className={`grid h-11 w-11 place-items-center rounded-full disabled:opacity-30 ${
               theme === "cream" ? "bg-[#2e2a24]/12" : "bg-white/14"
@@ -516,19 +603,32 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
             <ChevronLeft className="h-5 w-5" />
           </button>
 
-          <button
-            onClick={() => setChrome(false)}
-            className={`flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full text-[12px] font-bold tabular-nums ${
+          {/* type a page number and go — like archive.org's page field */}
+          <label
+            className={`flex h-11 flex-1 items-center justify-center gap-1 rounded-full px-2 text-[12px] font-bold tabular-nums ${
               theme === "cream" ? "bg-[#2e2a24]/8" : "bg-white/10"
             }`}
-            aria-label="Page number"
           >
             {loadingPage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-            {page} <span className="opacity-50">/ {total}</span>
-          </button>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={total}
+              value={page}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (Number.isFinite(n) && n >= 1 && n <= total) go(n);
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-10 bg-transparent text-center outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+              aria-label="Page number"
+            />
+            <span className="opacity-50">/ {total}</span>
+          </label>
 
           <button
-            onClick={() => go(page + 1)}
+            onClick={() => turn(1)}
             disabled={page >= total}
             className={`grid h-11 w-11 place-items-center rounded-full disabled:opacity-30 ${
               theme === "cream" ? "bg-[#2e2a24]/12" : "bg-white/14"
@@ -577,6 +677,12 @@ export function ProtectedBookReader({ bookId, sample = false, onClose, onNeedsPu
       >
         {info?.watermark || "Cronyzo"}
       </span>
+
+      {turnChip && (
+        <div className="pointer-events-none absolute left-1/2 top-1/2 z-30 -translate-x-1/2 -translate-y-1/2 rounded-xl bg-black/55 px-4 py-2 text-[12px] font-bold text-white backdrop-blur">
+          {turnChip}
+        </div>
+      )}
 
       {flash && (
         <div className="pointer-events-none absolute inset-x-3 bottom-28 z-30 mx-auto max-w-sm rounded-xl bg-slate-900/92 px-3 py-2 text-center text-[11.5px] font-bold text-white shadow-xl">
