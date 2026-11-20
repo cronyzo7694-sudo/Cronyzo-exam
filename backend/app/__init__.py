@@ -505,6 +505,18 @@ def _register_health_routes(app: Flask) -> None:
             report["database"] = "error"
             report["database_error"] = str(exc)[:300]
             report["status"] = "degraded"
+            lowered = str(exc).lower()
+            if "quota" in lowered or "exceeded" in lowered:
+                report["hint"] = (
+                    "Database provider ne plan quota khatam hone par connections band kar diye. "
+                    "Neon/Supabase dashboard me plan upgrade karein ya naya project banayein — "
+                    "data safe rehta hai."
+                )
+                report["docs"] = "https://console.neon.tech"
+            elif "too many connections" in lowered:
+                report["hint"] = "Connection limit — DB_USE_NULL_POOL=1 set karein ya pool size kam karein."
+            elif "password" in lowered or "authentication" in lowered:
+                report["hint"] = "DATABASE_URL ka password galat lag raha hai — Render ke environment variables check karein."
 
         try:
             usage = shutil.disk_usage(app.root_path)

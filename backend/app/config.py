@@ -102,6 +102,14 @@ def _env_str(name: str, default: Optional[str] = None) -> Optional[str]:
     return value if value else default
 
 
+def _truthy_env(name: str, default: bool = False) -> bool:
+    """Read a boolean-ish environment variable (1/true/yes/on)."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on", "y"}
+
+
 def _env_int(
     name: str,
     default: int,
@@ -317,10 +325,24 @@ def _build_engine_options(database_uri: str) -> dict:
     }
 
     if _is_postgres_url(database_uri) or database_uri.startswith("postgresql"):
+        # ── quota-friendly connections ────────────────────────────────────
+        # A managed Postgres (Neon/Supabase free tiers) only bills "compute
+        # time" while a connection is open. Holding ten idle pooled connections
+        # kept the database awake 24/7 and burned a whole month of free hours in
+        # about eight days — the shop then went dark with "quota exceeded".
+        # NullPool closes the connection as soon as a request is done, so the
+        # database can scale to zero, and a lightly used site costs nothing.
+        # Set DB_USE_NULL_POOL=0 to go back to a classic pool on a paid plan.
+        if _truthy_env("DB_USE_NULL_POOL", default=True):
+            from sqlalchemy.pool import NullPool
+
+            options["poolclass"] = NullPool
+            return options
+
         # Conservative pool for exam API — concurrent students saving answers
         options["pool_recycle"] = _env_int(
             "DB_POOL_RECYCLE",
-            280,
+            60,
             minimum=30,
             maximum=3600,
         )
@@ -328,8 +350,8 @@ def _build_engine_options(database_uri: str) -> dict:
         # never starves for DB connections under an exam-start rush. Each worker
         # process gets its own pool; keep per-worker modest to fit Postgres/Neon
         # connection limits. Override via env when scaling.
-        options["pool_size"] = _env_int("DB_POOL_SIZE", 10, minimum=1, maximum=50)
-        options["max_overflow"] = _env_int("DB_MAX_OVERFLOW", 10, minimum=0, maximum=100)
+        options["pool_size"] = _env_int("DB_POOL_SIZE", 2, minimum=1, maximum=50)
+        options["max_overflow"] = _env_int("DB_MAX_OVERFLOW", 2, minimum=0, maximum=100)
         # Don't hang forever waiting for a connection; fail fast and retry.
         options["pool_timeout"] = _env_int("DB_POOL_TIMEOUT", 10, minimum=1, maximum=60)
     elif _is_sqlite_url(database_uri):
